@@ -12,6 +12,9 @@ DEFAULT_TITLE = "Printer"
 
 SOURCE_DOMAIN = "ha_creality_ws"          # the Creality integration whose entities the panel shows and works
 
+RESTART_SUFFIX = "restart_printer"        # this integration's own entities on the printer's device: <device id>_<suffix>
+PAUSE_AT_LINE_SUFFIX = "pause_at_line"
+
 CONF_DEVICE = "device_id"
 CONF_TITLE = "title"
 CONF_NOTIFY = "notify"                    # notify services to tell: mobile_app_<phone>

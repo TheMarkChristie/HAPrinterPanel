@@ -114,6 +114,7 @@ WORDS = {
         "unnamed": "The print",
         "finished": "{name} is finished, after {time}.",
         "paused": "{name} is paused at {progress} %.",
+        "paused_line": "{name} is paused at line {line}, as asked.",
         "runout": "{name}: the filament ran out at {progress} %.",
         "error": "{name} stopped with an error at {progress} %.",
     },
@@ -122,6 +123,7 @@ WORDS = {
         "unnamed": "Utskriften",
         "finished": "{name} er ferdig, etter {time}.",
         "paused": "{name} er satt på pause ved {progress} %.",
+        "paused_line": "{name} er satt på pause ved linje {line}, som du ba om.",
         "runout": "{name}: filamentet gikk tomt ved {progress} %.",
         "error": "{name} stoppet med en feil ved {progress} %.",
     },
@@ -132,12 +134,16 @@ def language(lang: Any) -> str:
     return "nb" if re.match(r"^(nb|nn|no)\b", str(lang or ""), re.I) else "en"
 
 
-def message(event: str, lang: str, name: str | None, progress: Any, job_time: Any) -> tuple[str, str]:
-    """The notification's title and text for an event."""
-    words = WORDS[language(lang)]
+def message(event: str, lang: str, name: str | None, progress: Any, job_time: Any, line: Any = None) -> tuple[str, str]:
+    """The notification's title and text for an event (paused_line: a pause this integration made at a line)."""
+    lang = language(lang)
+    words = WORDS[lang]
     try:
         pct = int(round(float(progress)))
     except (TypeError, ValueError):
         pct = 0
-    text = words[event].format(name=name or words["unnamed"], progress=pct, time=duration(job_time, language(lang)) or "-")
+    if isinstance(line, int):  # 400,018 / 400 018
+        line = f"{line:,}".replace(",", " ") if lang == "nb" else f"{line:,}"
+    text = words[event].format(name=name or words["unnamed"], progress=pct, time=duration(job_time, lang) or "-",
+                               line=line if line is not None else "-")
     return words["title"], text

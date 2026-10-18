@@ -42,5 +42,40 @@
         "error": "A print stops with an error"
       }
     }
+  },
+  "entity": {
+    "button": {
+      "restart_printer": {
+        "name": "Restart printer"
+      }
+    },
+    "number": {
+      "pause_at_line": {
+        "name": "Pause at G-code line"
+      }
+    }
+  },
+  "exceptions": {
+    "not_printing": {
+      "message": "Nothing is printing."
+    },
+    "line_beyond": {
+      "message": "The print has {lines} lines, so there is no line {line}."
+    },
+    "line_passed": {
+      "message": "Line {line} is already printed: the printer is at line {at}."
+    },
+    "moonraker_no_host": {
+      "message": "The Creality integration has no address for this printer."
+    },
+    "moonraker_unreachable": {
+      "message": "Could not reach the printer's Moonraker: {detail}"
+    },
+    "moonraker_refused": {
+      "message": "The printer's Moonraker said no: {detail}"
+    },
+    "moonraker_gone": {
+      "message": "The printer's Moonraker dropped the connection: {detail}"
+    }
   }
 }

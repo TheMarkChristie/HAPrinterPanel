@@ -1,9 +1,9 @@
 """Check and screenshot the Printer page in headless Chrome, from the K2 Plus fixture (tests/fixtures/k2plus.json): what
-it shows mid-print, what each control asks Home Assistant to do, pictures that do not load, Norwegian, and the printer
-off. The page inlines the script and the states (a file:// page cannot fetch), stands in for the bit of hass the page
-reads, and records every service call; Home Assistant's own elements (ha-card, ha-icon, ha-menu-button) are stood in for
-by plain ones, and without its card helpers the camera is the snapshot fallback. The screenshots show the pictures
-loaded, with the brand images standing in for the camera and the print.
+it shows mid-print, what each control asks Home Assistant to do, the pause at a line, Restart, pictures that do not load,
+Norwegian, and the printer off. The page inlines the script and the states (a file:// page cannot fetch), stands in for
+the bit of hass the page reads, and records every service call; Home Assistant's own elements (ha-card, ha-icon,
+ha-menu-button) are stood in for by plain ones, and without its card helpers the camera is the snapshot fallback. The
+screenshots show the pictures loaded, with the brand images standing in for the camera and the print.
 
     python tests/render_panel.py   -> the checks printed; tests/render_wide.png and tests/render_phone.png
 """
@@ -21,9 +21,13 @@ ROOT = os.path.dirname(HERE)
 SCRIPT = os.path.join(ROOT, "custom_components", "printer_panel", "www", "printer-panel.js")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 FIXTURE = json.load(open(os.path.join(HERE, "fixtures", "k2plus.json"), encoding="utf-8"))
+RESTART, PAUSE_AT = "button.k2plus_235d_restart_printer", "number.k2plus_235d_pause_at_g_code_line"
 CONFIG = {"entry_id": "e1", "title": "Printer", "path": "printer", "device_id": "k2plus", "name": "K2Plus-235D", "model": "K2 Plus",
           **p.resolve(FIXTURE["registry"])}
+CONFIG["entities"].update(restart=RESTART, pause_at_line=PAUSE_AT)
 STATES = {s["entity_id"]: s for s in FIXTURE["states"]}
+STATES[RESTART] = {"entity_id": RESTART, "state": "unknown", "attributes": {"device_class": "restart"}}
+STATES[PAUSE_AT] = {"entity_id": PAUSE_AT, "state": "0", "attributes": {"min": 0, "max": 99999999, "step": 1, "mode": "box"}}
 
 STANDINS = r"""
 customElements.define("home-assistant", class extends HTMLElement {});
@@ -37,9 +41,12 @@ const out = (t) => document.getElementById('out').textContent += t + '\n';
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const calls = [];
 let states = JSON.parse(JSON.stringify(STATES));
+window.POS = { available: true, target: null, state: "printing", line: 341202, lines: 495870, eta: null };
 const mk = (lang) => ({ states, locale: { language: lang, time_format: "24", time_zone: "local" }, config: { time_zone: "Europe/Oslo" },
-  language: lang, hassUrl: (u) => u, callWS: async (m) => (m.type === "printer_panel/config" ? CONFIG : null),
-  callService: async (d, s, data) => { calls.push(`${d}.${s} ${JSON.stringify(data)}`); if (window.REFUSE) throw new Error("printer busy"); } });
+  language: lang, hassUrl: (u) => u,
+  callWS: async (m) => (m.type === "printer_panel/config" ? CONFIG : m.type === "printer_panel/position" ? JSON.parse(JSON.stringify(window.POS)) : null),
+  callService: async (d, s, data) => { calls.push(`${d}.${s} ${JSON.stringify(data)}`); if (window.REFUSE) throw new Error(window.REFUSE); } });
+const set = (id, state) => { states = JSON.parse(JSON.stringify(states)); states[id] = { ...states[id], state }; panel.hass = mk("en"); };
 const panel = document.createElement("printer-panel");
 document.getElementById("app").appendChild(panel);
 panel.panel = { config: { entry_id: "e1" } };
@@ -57,13 +64,14 @@ const pictures = async () => {
   panel.hass = mk("en"); panel._snapshot(); await wait(300);
 };
 (async () => {
-  await wait(100);
+  await wait(150);
   r = panel.shadowRoot;
   if (!CHECK) { await pictures(); return; }
   out(`pictures that do not load: print picture shown ${vis(".preview")}, name full width ${q(".head").classList.contains("nopic")} | camera: ${vis(".camwrap img")}, "${txt(".camwrap .nocam")}"`);
   out(`header: ${txt(".bar .title")} | status ${txt(".bar .status")}`);
   out(`print: ${txt(".name")} | ${txt(".sub")} | ${txt(".pct")} | ${txt(".times").replace(/\s+/g, " ")}`);
-  out(`buttons: pause ${vis('[data-act="pause"]')}, resume ${vis('[data-act="resume"]')}, stop ${vis('[data-act="stop"]')}, light pressed ${q('[data-act="light"]').getAttribute("aria-pressed")}`);
+  out(`buttons: pause ${vis('[data-act="pause"]')}, resume ${vis('[data-act="resume"]')}, stop ${vis('[data-act="stop"]')}, restart ${vis('[data-act="restart"]')}, light pressed ${q('[data-act="light"]').getAttribute("aria-pressed")}`);
+  out(`line: box ${vis(".line")} | "${txt(".linepos")}" | armed "${txt(".linestate")}" | cancel ${vis('[data-line="cancel"]')}`);
   out(`temperatures: ${[...r.querySelectorAll("[data-temp]")].map((row) => `${row.querySelector(".what").textContent} ${row.querySelector(".now").textContent} target ${row.querySelector("input") ? row.querySelector("input").value : "-"}`).join(" | ")}`);
   out(`speed: ${txt("[data-speed] .now")} | modes pressed: ${[...r.querySelectorAll(".mode")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent).join(",")}`);
   out(`fans: ${[...r.querySelectorAll("[data-fan]")].map((row) => `${row.firstElementChild.textContent} ${row.querySelector(".val").textContent} ${row.querySelector(".switch").textContent}`).join(" | ")}`);
@@ -76,10 +84,10 @@ const pictures = async () => {
   panel.hass = mk("en"); await wait(10);
   q('[data-act="stop"]').disabled = false;
   q('[data-act="stop"]').click(); await wait(20);
-  out(`stop asks first: dialog open ${q("dialog.confirm").open}, calls ${calls.length}`);
+  out(`stop asks first: dialog open ${q("dialog.confirm").open} "${txt("dialog h3")}" / "${txt('[data-dlg="go"]')}", calls ${calls.length}`);
   q('[data-dlg="cancel"]').click(); await wait(20);
   out(`cancel: dialog open ${q("dialog.confirm").open}, calls ${calls.length}`);
-  q('[data-act="stop"]').click(); await wait(20); q('[data-dlg="stop"]').click(); await wait(20);
+  q('[data-act="stop"]').click(); await wait(20); q('[data-dlg="go"]').click(); await wait(20);
   out(`confirm -> ${calls.pop()}`);
   q('[data-act="light"]').click(); await wait(20);
   out(`light -> ${calls.pop()}`);
@@ -93,10 +101,31 @@ const pictures = async () => {
   out(`part fan 50 -> ${calls.pop()}`);
   fan.value = "0"; fan.dispatchEvent(new Event("change", { bubbles: true })); await wait(20);
   out(`part fan 0 -> ${calls.pop()}`);
-  window.REFUSE = true;
+  window.REFUSE = "printer busy";
   r.querySelector('[data-fan="fan_side"] .switch').click(); await wait(30);
   out(`refused: "${txt(".msg")}"`);
-  window.REFUSE = false;
+  window.REFUSE = null;
+  calls.length = 0;
+  // the pause at a line
+  const line = q(".lineinput");
+  q('[data-line="set"]').click(); await wait(20);
+  out(`set with an empty box -> ${calls.length ? calls.pop() : "nothing asked"}`);
+  line.value = "400000"; q('[data-line="set"]').click(); await wait(40);
+  out(`set 400000 -> ${calls.pop()} | box emptied ${line.value === ""}`);
+  line.value = "420000"; line.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await wait(40);
+  out(`Enter 420000 -> ${calls.pop()}`);
+  window.POS = { ...window.POS, target: 400000, eta: 725 };
+  set(PAUSE_AT_ID, "400000"); await panel._refreshPos(); await wait(20);
+  out(`armed: "${txt(".linestate")}" | cancel ${vis('[data-line="cancel"]')}`);
+  window.POS = { ...window.POS, eta: 40 }; await panel._refreshPos(); await wait(20);
+  out(`close: "${txt(".linestate")}"`);
+  q('[data-line="cancel"]').click(); await wait(20);
+  out(`cancel -> ${calls.pop()}`);
+  window.REFUSE = "Line 300000 is already printed: the printer is at line 341202.";
+  line.value = "300000"; q('[data-line="set"]').click(); await wait(40);
+  out(`refused line: "${txt(".msg")}" | box kept ${line.value}`);
+  window.REFUSE = null;
+  calls.length = 0;
   // the slot in use, from the active slot sensor (slots counted from 1; older versions of the integration said it in words)
   const act = Object.keys(STATES).find((k) => k.endsWith("_active_filament_slot"));
   for (const v of ["box_1_slot_4", "external", "Box 1 Slot 3", "unknown"]) {
@@ -105,13 +134,22 @@ const pictures = async () => {
   }
   out(`print file colours: "${txt(".uses")}" ${r.querySelectorAll(".uses .dot").length} dots`);
   // Norwegian
-  panel.hass = mk("nb"); await wait(30);
-  out(`nb: ${txt(".bar .status")} | ${txt(".times").replace(/\s+/g, " ")} | ${txt('[data-act="pause"]')}`);
-  // the printer off
+  window.POS = { ...window.POS, target: 400000, eta: 725 };
+  states[PAUSE_AT_ID] = { ...states[PAUSE_AT_ID], state: "400000" };
+  panel.hass = mk("nb"); await panel._refreshPos(); await wait(30);
+  out(`nb: ${txt(".bar .status")} | ${txt(".times").replace(/\s+/g, " ")} | ${txt('[data-act="pause"]')} | "${txt(".linepos")}" | "${txt(".linestate")}"`);
+  // idle: Restart shows, asks, restarts
   const status = Object.keys(states).find((k) => k.endsWith("_print_status"));
+  states = JSON.parse(JSON.stringify(STATES)); states[status] = { ...states[status], state: "idle" }; panel.hass = mk("en"); await wait(30);
+  out(`idle: restart ${vis('[data-act="restart"]')} | pause ${vis('[data-act="pause"]')} | line box ${vis(".line")}`);
+  q('[data-act="restart"]').click(); await wait(20);
+  out(`restart asks first: "${txt("dialog h3")}" "${txt("dialog p")}" / "${txt('[data-dlg="go"]')}", calls ${calls.length}`);
+  q('[data-dlg="go"]').click(); await wait(30);
+  out(`restart -> ${calls.pop()} | "${txt(".msg")}" (info ${q(".msg").classList.contains("info")})`);
+  // the printer off
   states = JSON.parse(JSON.stringify(states)); states[status] = { ...states[status], state: "unavailable", attributes: {} };
   panel.hass = mk("en"); await wait(30);
-  out(`off: ${txt(".bar .status")} | "${txt(".offline")}" | pause shown ${vis('[data-act="pause"]')} | nozzle input disabled ${r.querySelector('[data-temp="nozzle"] input').disabled}`);
+  out(`off: ${txt(".bar .status")} | "${txt(".offline")}" | pause shown ${vis('[data-act="pause"]')} | restart shown ${vis('[data-act="restart"]')} | nozzle input disabled ${r.querySelector('[data-temp="nozzle"] input').disabled}`);
   // back to printing, the pictures loading
   await pictures();
   out(`pictures that load: print picture shown ${vis(".preview")}, name full width ${q(".head").classList.contains("nopic")} | camera: ${vis(".camwrap img")}, note shown ${vis(".camwrap .nocam")}`);
@@ -128,13 +166,14 @@ def page(width: int, checks: bool) -> str:
             "<body><div id='app'></div><div id='out'></div>"
             "<script>window.onerror=function(m,s,l){document.getElementById('out').textContent+='ERROR '+m+' @'+l+'\\n'}</script>"
             f"<script>{STANDINS}</script><script>{open(SCRIPT, encoding='utf-8').read()}</script>"
-            f"<script>const STATES={json.dumps(STATES)};const CONFIG={json.dumps(CONFIG)};const CHECK={json.dumps(checks)};{CHECKS}</script>"
+            f"<script>const STATES={json.dumps(STATES)};const CONFIG={json.dumps(CONFIG)};const CHECK={json.dumps(checks)};"
+            f"const PAUSE_AT_ID={json.dumps(PAUSE_AT)};{CHECKS}</script>"
             "</body></html>")
 
 
 def chrome(url: str, *args: str) -> str:
     return subprocess.run([CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--allow-file-access-from-files",
-                           "--virtual-time-budget=10000", *args, url], capture_output=True, text=True, encoding="utf-8", timeout=120).stdout
+                           "--virtual-time-budget=15000", *args, url], capture_output=True, text=True, encoding="utf-8", timeout=120).stdout
 
 
 def run(width: int, height: int, name: str, checks: bool) -> None:
@@ -145,7 +184,10 @@ def run(width: int, height: int, name: str, checks: bool) -> None:
             open(html, "w", encoding="utf-8").write(page(width, True))
             dom = chrome(url, "--dump-dom")
             start = dom.find('<div id="out">')
-            print(dom[start + 14: dom.find("</div>", start)].replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&").replace("&quot;", '"'))
+            text = dom[start + 14: dom.find("</div>", start)]
+            for code, char in (("&gt;", ">"), ("&lt;", "<"), ("&quot;", '"'), ("&nbsp;", " "), ("&amp;", "&")):
+                text = text.replace(code, char)
+            print(text)
         open(html, "w", encoding="utf-8").write(page(width, False))
         png = os.path.join(HERE, f"render_{name}.png")
         chrome(url, f"--window-size={width},{height}", f"--screenshot={png}")
@@ -155,5 +197,5 @@ def run(width: int, height: int, name: str, checks: bool) -> None:
 
 
 if __name__ == "__main__":
-    run(1280, 1330, "wide", True)
-    run(400, 2080, "phone", False)
+    run(1280, 1460, "wide", True)
+    run(400, 2280, "phone", False)

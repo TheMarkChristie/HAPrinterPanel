@@ -1,6 +1,6 @@
 """One printer in Home Assistant: its entities (found again whenever the entity registry changes, so a rename is
-followed), what the Printer page is told about it, and the phone notifications when a print finishes, pauses, runs out
-of filament or stops with an error."""
+followed), what the Printer page is told about it, the phone notifications when a print finishes, pauses, runs out of
+filament or stops with an error, and the way to its Moonraker (for the pause at a line and the restart)."""
 from __future__ import annotations
 
 import logging
@@ -10,9 +10,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, DEFAULT_EVENTS, DEFAULT_TITLE
+from .const import (CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, DEFAULT_EVENTS, DEFAULT_TITLE, DOMAIN,
+                    PAUSE_AT_LINE_SUFFIX, RESTART_SUFFIX, SOURCE_DOMAIN)
+from .linepause import LinePause
+from .moonraker import Moonraker, MoonrakerError
 from .printer import filament_event, message, print_event, print_name, resolve
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +32,7 @@ class PrinterLink:
         self.map = self._resolve()
         self._unwatch: CALLBACK_TYPE | None = None
         self._missing_targets: set[str] = set()
+        self.line_pause = LinePause(self)
 
     @property
     def device_id(self) -> str:
@@ -43,12 +48,40 @@ class PrinterLink:
                         "disabled_by": e.disabled_by}
                        for e in er.async_entries_for_device(registry, self.device_id, include_disabled_entities=True))
 
+    def host(self) -> str | None:
+        """The printer's address, from the Creality integration's entry for its device (which follows the printer)."""
+        device = dr.async_get(self.hass).async_get(self.device_id)
+        if device is None:
+            return None
+        # a device belongs to one config entry from Home Assistant 2026.10 (config_entry_id); before, to a set of them
+        entry_ids = [device.config_entry_id] if hasattr(device, "config_entry_id") else list(device.config_entries)
+        for entry_id in entry_ids:
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            if entry and entry.domain == SOURCE_DOMAIN and entry.data.get("host"):
+                return str(entry.data["host"]).strip()
+        return None
+
+    def moonraker(self) -> Moonraker:
+        if not (host := self.host()):
+            raise MoonrakerError("no_host")
+        return Moonraker(async_get_clientsession(self.hass), host)
+
+    def _own(self) -> dict[str, str]:
+        """This integration's own entities on the printer: Restart printer, Pause at G-code line (unless disabled)."""
+        registry, found = er.async_get(self.hass), {}
+        for what, platform, suffix in (("restart", "button", RESTART_SUFFIX), ("pause_at_line", "number", PAUSE_AT_LINE_SUFFIX)):
+            entity_id = registry.async_get_entity_id(platform, DOMAIN, f"{self.device_id}_{suffix}")
+            entry = registry.async_get(entity_id) if entity_id else None
+            if entry and not entry.disabled_by:
+                found[what] = entry.entity_id
+        return found
+
     def describe(self) -> dict[str, Any]:
         """What the page needs to draw this printer: its entities, the CFS boxes and slots, and its names."""
         device = dr.async_get(self.hass).async_get(self.device_id)
         return {"entry_id": self.entry.entry_id, "title": self.title, "path": self.path, "device_id": self.device_id,
                 "name": (device.name_by_user or device.name) if device else None, "model": device.model if device else None,
-                **self.map}
+                **self.map, "entities": {**self.map["entities"], **self._own()}}
 
     @callback
     def async_start(self) -> CALLBACK_TYPE:
@@ -59,6 +92,7 @@ class PrinterLink:
         @callback
         def stop() -> None:
             stop_registry()
+            self.line_pause.stop()
             if self._unwatch:
                 self._unwatch()
                 self._unwatch = None
@@ -89,8 +123,9 @@ class PrinterLink:
             what = print_event(before, after)
         else:
             what = filament_event(before, after)
+        line = self.line_pause.take_fired() if what == "paused" else None
         if what and what in (self.entry.options.get(CONF_EVENTS) or DEFAULT_EVENTS) and self.entry.options.get(CONF_NOTIFY):
-            self.hass.async_create_task(self._notify(what), f"printer_panel {what}")
+            self.hass.async_create_task(self._notify(what, line), f"printer_panel {what}")
 
     def _state(self, what: str):
         entity_id = self.map["entities"].get(what)
@@ -110,9 +145,9 @@ class PrinterLink:
             return f"/api/camera_proxy/{camera.entity_id}"
         return None
 
-    def notification(self, what: str) -> dict[str, Any]:
+    def notification(self, what: str, line: int | None = None) -> dict[str, Any]:
         """The notification for an event: its title, text and the phone app's extras (a picture of the print, and a tap
-        that opens the Printer page)."""
+        that opens the Printer page). A pause this integration made at a line says the line."""
         status, material = self._state("status"), self._state("material")
         name = print_name(status.attributes.get("file") if status else None) \
             or print_name(material.attributes.get("gcode_file") if material else None)
@@ -120,15 +155,16 @@ class PrinterLink:
         progress = progress_state.state if progress_state else (status.attributes.get("progress") if status else None)
         job_state = self._state("job_time")
         job = job_state.state if job_state else (status.attributes.get("job_time_s") if status else None)
-        title, text = message(what, self.hass.config.language, name, progress, job)
+        title, text = message("paused_line" if what == "paused" and line else what, self.hass.config.language, name,
+                              progress, job, line)
         data: dict[str, Any] = {"tag": f"printer_panel_{self.entry.entry_id}", "group": "printer",
                                 "clickAction": f"/{self.path}", "url": f"/{self.path}"}
         if picture := self._picture():
             data["image"] = picture
         return {"title": title, "message": text, "data": data}
 
-    async def _notify(self, what: str) -> None:
-        payload = self.notification(what)
+    async def _notify(self, what: str, line: int | None = None) -> None:
+        payload = self.notification(what, line)
         for target in self.entry.options.get(CONF_NOTIFY) or []:
             if not self.hass.services.has_service("notify", target):
                 if target not in self._missing_targets:

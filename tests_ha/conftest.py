@@ -41,9 +41,10 @@ FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "k2plus.json").read_text(enc
 
 
 async def _light_setup(hass: HomeAssistant, config: Any) -> bool:
-    from custom_components.printer_panel import ws_config
+    from custom_components.printer_panel import ws_config, ws_position
 
     websocket_api.async_register_command(hass, ws_config)
+    websocket_api.async_register_command(hass, ws_position)
     return True
 
 
@@ -69,9 +70,10 @@ def phone(hass: HomeAssistant) -> list[dict[str, Any]]:
 
 @pytest.fixture
 def k2plus(hass: HomeAssistant) -> dict[str, str]:
-    """The K2 Plus as the Creality integration registers it: its device and every entity with its key; the states as they
-    were mid-print. Returns translation key -> entity id."""
-    source = MockConfigEntry(domain="ha_creality_ws", title="Creality Printer (WS)")
+    """The K2 Plus as the Creality integration registers it: its entry (with the printer's address), its device and every
+    entity with its key; the states as they were mid-print. Returns translation key -> entity id, and the Creality
+    entry's id as creality_entry."""
+    source = MockConfigEntry(domain="ha_creality_ws", title="Creality Printer (WS)", data={"host": "192.0.2.60"})
     source.add_to_hass(hass)
     device = dr.async_get(hass).async_get_or_create(config_entry_id=source.entry_id, identifiers={("ha_creality_ws", "k2plus")},
                                                     name="K2Plus-235D", model="K2 Plus")
@@ -85,4 +87,4 @@ def k2plus(hass: HomeAssistant) -> dict[str, str]:
         ids.setdefault(e.get("translation_key") or e["entity_id"], made.entity_id)
     for s in FIXTURE["states"]:
         hass.states.async_set(s["entity_id"], s["state"], s.get("attributes") or {})
-    return {"device_id": device.id, **ids}
+    return {"device_id": device.id, "creality_entry": source.entry_id, **ids}

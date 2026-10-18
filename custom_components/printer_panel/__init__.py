@@ -1,7 +1,8 @@
 """Printer Panel: a Printer page in Home Assistant's sidebar for a Creality printer, built on the Creality integration
 (ha_creality_ws): the live camera, the print's name, progress, time left and finish time, temperatures and their targets,
 the CFS's colours, speed and fans, the light, and Pause, Resume and Stop; and phone notifications when a print finishes,
-pauses, runs out of filament or stops with an error. The same view is a card (custom:printer-panel-card)."""
+pauses, runs out of filament or stops with an error. The same view is a card (custom:printer-panel-card). Through the
+printer's Moonraker, two entities of its own on the printer: Restart printer, and Pause at G-code line."""
 from __future__ import annotations
 
 import hashlib
@@ -13,14 +14,18 @@ import voluptuous as vol
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 
 from .const import DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
+from .linepause import STORE_VERSION
 from .link import PrinterLink
 
 WWW = Path(__file__).parent / "www"
+PLATFORMS = [Platform.BUTTON, Platform.NUMBER]
 _STATIC = f"{DOMAIN}_static"
 _SCRIPT_URL = f"{DOMAIN}_script_url"
 
@@ -49,6 +54,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, str(WWW), cache_headers=False)])
         hass.data[_STATIC] = True
         websocket_api.async_register_command(hass, ws_config)
+        websocket_api.async_register_command(hass, ws_position)
     frontend.add_extra_js_url(hass, await _script_url(hass))
     return True
 
@@ -68,6 +74,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await panel_custom.async_register_panel(
         hass, frontend_url_path=link.path, webcomponent_name=PANEL_ELEMENT, module_url=await _script_url(hass),
         sidebar_title=link.title, sidebar_icon=SIDEBAR_ICON, config={"entry_id": entry.entry_id}, require_admin=False)
+    await link.line_pause.async_load()  # before the entities, so Pause at G-code line starts with the line kept
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(link.async_start())
     entry.async_on_unload(entry.add_update_listener(_options_changed))
     return True
@@ -77,7 +85,14 @@ async def _options_changed(hass: HomeAssistant, entry: ConfigEntry) -> None:
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """The printer's entry is deleted: its pause at a line goes with it."""
+    await Store(hass, STORE_VERSION, f"{DOMAIN}.{entry.entry_id}.line_pause").async_remove()
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     frontend.async_remove_panel(hass, entry.runtime_data.path)
     return True
 
@@ -93,3 +108,17 @@ def ws_config(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
         connection.send_error(msg["id"], "not_found", "No printer is set up in Printer Panel")
         return
     connection.send_result(msg["id"], entry.runtime_data.describe())
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/position", vol.Optional("entry_id"): str})
+@websocket_api.async_response
+async def ws_position(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """Where the printer is in the file it is printing, for the page: the line, of how many, the line it will pause at
+    and in about how long. From the printer's Moonraker; available false when it cannot be reached."""
+    wanted = msg.get("entry_id")
+    entries = hass.config_entries.async_loaded_entries(DOMAIN)
+    entry = next((e for e in entries if not wanted or e.entry_id == wanted), None)
+    if entry is None:
+        connection.send_error(msg["id"], "not_found", "No printer is set up in Printer Panel")
+        return
+    connection.send_result(msg["id"], await entry.runtime_data.line_pause.position())

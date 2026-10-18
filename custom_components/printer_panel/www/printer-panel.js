@@ -26,6 +26,34 @@
     };
   }
 
+  /* Home Assistant's ha-icon asks for a custom icon once, when it is first drawn, and an icon set that is not there yet
+   * leaves it empty for good (frontend 2026.9 and 2026.10). Extra scripts load alongside the frontend, so the sidebar
+   * can draw first: the Printer item (and HACS's) with no icon. So a sidebar icon left empty whose set is there now is
+   * asked again: by way of an MDI icon, which clears the empty state it was left in, then its own. Only sidebar icons,
+   * only empty ones, only for sets that now exist; a few times in the first minute, for sets that load after this. */
+  const SWAP_ICON = "mdi:blank";
+  function repairSidebarIcons() {
+    const ha = document.querySelector("home-assistant");
+    const main = ha && ha.shadowRoot && ha.shadowRoot.querySelector("home-assistant-main");
+    const sidebar = main && main.shadowRoot && main.shadowRoot.querySelector("ha-sidebar");
+    if (!sidebar || !sidebar.shadowRoot) return 0;
+    let repaired = 0;
+    sidebar.shadowRoot.querySelectorAll("ha-icon").forEach((el) => {
+      const icon = typeof el.icon === "string" ? el.icon : "";
+      const prefix = icon.split(":")[0];
+      const known = (window.customIcons && window.customIcons[prefix]) || (window.customIconsets && window.customIconsets[prefix]);
+      if (!known || el.__printerPanelRepair || !el.shadowRoot || !el.shadowRoot.querySelector("iron-icon")) return;
+      el.__printerPanelRepair = true;
+      repaired += 1;
+      el.icon = SWAP_ICON;
+      Promise.resolve(el.updateComplete).then(() => {
+        if (el.icon === SWAP_ICON) el.icon = icon;
+      }).finally(() => { el.__printerPanelRepair = false; });
+    });
+    return repaired;
+  }
+  [0, 500, 1500, 4000, 10000, 30000, 60000].forEach((ms) => setTimeout(repairSidebarIcons, ms));
+
   const STR = {
     en: {
       title: "Printer", camera: "Camera", noCamera: "No camera", noPicture: "No picture from the camera yet", preview: "Picture of the print",
@@ -39,6 +67,12 @@
       printingFor: (t) => `Printing for ${t}`,
       pause: "Pause", resume: "Resume", stop: "Stop", light: "Light",
       stopAsk: "Stop the print?", stopHint: "A stopped print cannot be resumed.", cancel: "Cancel", stopPrint: "Stop the print",
+      restart: "Restart", restartAsk: "Restart the printer?", restartPrinter: "Restart printer",
+      restartHint: "It switches off and on again: the screen, the camera and the CFS restart, and it is back in a minute or two.",
+      restarting: "Restarting the printer: it is back in a minute or two.",
+      lineAt: (a, b) => `Line ${a} of ${b}`, pauseAt: "Pause at line", setLine: "Set", cancelLine: "Cancel",
+      pausesAt: (n, when) => `Pauses at line ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `in about ${t}`, soon: "any moment now",
+      lineHint: "It pauses about a second after the printer reaches the line.",
       temps: "Temperatures", nozzle: "Nozzle", bed: "Bed", chamber: "Chamber", target: "Target", off2: "off", onW: "On", offW: "Off",
       lower: (w) => `Lower the ${w} target`, raise: (w) => `Raise the ${w} target`, setTarget: (w) => `${w} target`,
       cfs: "CFS", box: (n) => `Box ${n}`, external: "External spool", empty: "Empty", low: "Low", inUse: "In use",
@@ -46,7 +80,8 @@
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
-      failed: (what, why) => `Could not ${what}: ${why}`, verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that" },
+      failed: (what, why) => `Could not ${what}: ${why}`,
+      verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", restart: "restart the printer", line: "set the pause" },
       notSetUp: "No printer is set up in Printer Panel yet. Add it under Settings, Devices & services.",
       cantLoad: "The printer's details could not be read; trying again.",
     },
@@ -62,6 +97,12 @@
       printingFor: (t) => `Har skrevet ut i ${t}`,
       pause: "Pause", resume: "Fortsett", stop: "Stopp", light: "Lys",
       stopAsk: "Stoppe utskriften?", stopHint: "En stoppet utskrift kan ikke fortsettes.", cancel: "Avbryt", stopPrint: "Stopp utskriften",
+      restart: "Omstart", restartAsk: "Starte skriveren på nytt?", restartPrinter: "Start skriveren på nytt",
+      restartHint: "Den slås av og på igjen: skjermen, kameraet og CFS starter på nytt, og den er tilbake om et minutt eller to.",
+      restarting: "Starter skriveren på nytt: den er tilbake om et minutt eller to.",
+      lineAt: (a, b) => `Linje ${a} av ${b}`, pauseAt: "Pause ved linje", setLine: "Sett", cancelLine: "Avbryt",
+      pausesAt: (n, when) => `Pauser ved linje ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `om omtrent ${t}`, soon: "når som helst nå",
+      lineHint: "Den pauser omtrent et sekund etter at skriveren når linjen.",
       temps: "Temperaturer", nozzle: "Dyse", bed: "Plate", chamber: "Kammer", target: "Mål", off2: "av", onW: "På", offW: "Av",
       lower: (w) => `Senk målet for ${w.toLowerCase()}`, raise: (w) => `Øk målet for ${w.toLowerCase()}`, setTarget: (w) => `Mål for ${w.toLowerCase()}`,
       cfs: "CFS", box: (n) => `Boks ${n}`, external: "Ekstern spole", empty: "Tom", low: "Lite igjen", inUse: "I bruk",
@@ -69,7 +110,8 @@
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Delkjøling", fanSide: "Sidevifte", fanCase: "Kabinettvifte", fanOn: (w) => `${w} av eller på`, fanLevel: (w) => `Fart for ${w.toLowerCase()}`,
-      failed: (what, why) => `Kunne ikke ${what}: ${why}`, verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det" },
+      failed: (what, why) => `Kunne ikke ${what}: ${why}`,
+      verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", restart: "starte skriveren på nytt", line: "sette pausen" },
       notSetUp: "Ingen skriver er satt opp i Printer Panel ennå. Legg den til under Innstillinger, Enheter og tjenester.",
       cantLoad: "Kunne ikke lese skriverens detaljer; prøver igjen.",
     },
@@ -158,7 +200,19 @@
     .btn:disabled { opacity: 0.45; cursor: default; }
     .btn:focus-visible, .step:focus-visible, input:focus-visible, .mode:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
     .msg { min-height: 0; margin-top: 8px; font-size: 13px; color: var(--error-color, #db4437); }
+    .msg.info { color: var(--secondary-text-color); }
     .msg:empty { display: none; }
+    .btn.small { min-height: 36px; padding: 0 12px; }
+    .line { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider-color); }
+    .linepos { font-size: 14px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
+    .lineset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .lineset label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .lineinput { font: inherit; width: 9em; height: 36px; box-sizing: border-box; padding: 0 8px; border-radius: 10px;
+                 border: 1px solid var(--divider-color); background: var(--card-background-color, transparent); color: var(--primary-text-color); }
+    .lineinput:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .linestate { font-size: 14px; font-weight: 500; color: var(--warning-color, #ffa600); font-variant-numeric: tabular-nums; }
+    .linehint { font-size: 12px; color: var(--secondary-text-color); }
+    .linepos:empty, .linestate:empty { display: none; }
     .offline { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 14px;
                background: color-mix(in srgb, var(--warning-color, #ffa600) 14%, transparent); }
     .offline:empty { display: none; }
@@ -308,7 +362,16 @@
                   ${has("resume") ? `<button class="btn primary" data-act="resume"><ha-icon icon="mdi:play"></ha-icon>${esc(s.resume)}</button>` : ""}
                   ${has("stop") ? `<button class="btn danger" data-act="stop"><ha-icon icon="mdi:stop"></ha-icon>${esc(s.stop)}</button>` : ""}
                   ${has("light") ? `<button class="btn" data-act="light" aria-pressed="false"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>${esc(s.light)}</button>` : ""}
+                  ${has("restart") ? `<button class="btn" data-act="restart" hidden><ha-icon icon="mdi:restart"></ha-icon>${esc(s.restart)}</button>` : ""}
                 </div>
+                ${has("pause_at_line") ? `<div class="line" hidden>
+                  <div class="linepos"></div>
+                  <div class="lineset"><label>${esc(s.pauseAt)}<input class="lineinput" type="number" inputmode="numeric" min="1" step="1"></label>
+                    <button class="btn small" data-line="set">${esc(s.setLine)}</button>
+                    <button class="btn small" data-line="cancel" hidden>${esc(s.cancelLine)}</button></div>
+                  <div class="linestate" role="status"></div>
+                  <div class="linehint">${esc(s.lineHint)}</div>
+                </div>` : ""}
                 <div class="msg" role="status" aria-live="polite"></div>
                 <div class="offline"></div>
               </ha-card>
@@ -324,10 +387,10 @@
                 ${fan("fan_model", s.fanModel)}${fan("fan_side", s.fanSide)}${fan("fan_case", s.fanCase)}</ha-card>` : ""}
             </div>
           </div>
-          <dialog class="confirm" aria-labelledby="stop-title">
-            <h3 id="stop-title">${esc(s.stopAsk)}</h3><p>${esc(s.stopHint)}</p>
+          <dialog class="confirm" aria-labelledby="dlg-title">
+            <h3 id="dlg-title"></h3><p></p>
             <div class="actions"><button class="btn" data-dlg="cancel" autofocus>${esc(s.cancel)}</button>
-              <button class="btn danger" data-dlg="stop"><ha-icon icon="mdi:stop"></ha-icon>${esc(s.stopPrint)}</button></div>
+              <button class="btn danger" data-dlg="go"><ha-icon></ha-icon><span></span></button></div>
           </dialog>
         </div>`;
       this._placeMenu();
@@ -347,6 +410,8 @@
         else if (t.dataset.step) this._nudgeTemp(t.closest("[data-temp]").dataset.temp, Number(t.dataset.step));
         else if (t.dataset.sstep) this._nudgeSpeed(Number(t.dataset.sstep));
         else if (t.dataset.mode) this._setNumber("speed", Number(t.dataset.mode));
+        else if (t.dataset.line === "set") this._setLine();
+        else if (t.dataset.line === "cancel") this._call("number", "set_value", { entity_id: this._cfg.entities.pause_at_line, value: 0 }, "line");
         else if (t.classList.contains("switch")) this._call("fan", "toggle", { entity_id: this._cfg.entities[t.closest("[data-fan]").dataset.fan] }, "set");
       });
       root.addEventListener("change", (ev) => {
@@ -361,10 +426,11 @@
         }
       });
       root.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && ev.target.matches && ev.target.matches(".stepper input")) ev.target.blur();
+        if (ev.key !== "Enter" || !ev.target.matches) return;
+        if (ev.target.matches(".lineinput")) { ev.preventDefault(); this._setLine(); } else if (ev.target.matches(".stepper input")) ev.target.blur();
       });
       const dlg = root.querySelector("dialog.confirm");
-      if (dlg) dlg.addEventListener("close", () => { const stop = root.querySelector('[data-act="stop"]'); if (stop) stop.focus(); });
+      if (dlg) dlg.addEventListener("close", () => { const opener = root.querySelector(`[data-act="${this._asking}"]`); if (opener && !opener.hidden) opener.focus(); });
       const pic = root.querySelector(".preview");
       if (pic) {
         pic.addEventListener("load", () => { pic.dataset.ok = "1"; this._showPic(pic); });
@@ -420,10 +486,12 @@
 
     disconnectedCallback() {
       if (this._snapTimer) { clearInterval(this._snapTimer); this._snapTimer = null; }
+      this._stopPos();
     }
 
     connectedCallback() {
       if (this._camImg && !this._snapTimer) this._snapTimer = setInterval(() => this._snapshot(), 10000);
+      if (this._built && this._hass) this._update();
     }
 
     _st(what) {
@@ -530,7 +598,15 @@
         const icon = lightBtn.querySelector("ha-icon");
         if (icon) icon.setAttribute("icon", light && light.state === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-outline");
       }
+      // Restart: not while a print is under way (Mark: hidden while printing); kept usable while the printer is out of
+      // reach, as a restart is how it comes back
+      const restartBtn = root.querySelector('[data-act="restart"]');
+      if (restartBtn) restartBtn.hidden = active;
       this._text(root.querySelector(".offline"), online ? "" : s.offline);
+
+      // the pause at a line, and where the printer is in the file (asked every few seconds while a print is under way)
+      this._lineUpdate(active);
+      if (active && this.isConnected && this._cfg.entities.pause_at_line) this._startPos(); else this._stopPos();
 
       // temperatures
       root.querySelectorAll("[data-temp]").forEach((row) => {
@@ -662,18 +738,106 @@
     _act(act) {
       const e = this._cfg.entities;
       if (act === "light") { this._call("light", "toggle", { entity_id: e.light }, "set"); return; }
-      if (act === "stop") {
-        const dlg = this.shadowRoot.querySelector("dialog.confirm");
-        if (dlg && dlg.showModal) dlg.showModal();
-        return;
-      }
+      if (act === "stop" || act === "restart") { this._ask(act); return; }
       this._press(act);
+    }
+
+    /* Stop and Restart ask first, in one dialog */
+    _ask(kind) {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.confirm");
+      if (!dlg || !dlg.showModal) return;
+      const [title, hint, go, icon] = kind === "restart"
+        ? [s.restartAsk, s.restartHint, s.restartPrinter, "mdi:restart"] : [s.stopAsk, s.stopHint, s.stopPrint, "mdi:stop"];
+      this._asking = kind;
+      dlg.querySelector("h3").textContent = title;
+      dlg.querySelector("p").textContent = hint;
+      const button = dlg.querySelector('[data-dlg="go"]');
+      button.querySelector("span").textContent = go;
+      button.querySelector("ha-icon").setAttribute("icon", icon);
+      dlg.showModal();
     }
 
     _dialog(choice) {
       const dlg = this.shadowRoot.querySelector("dialog.confirm");
       if (dlg) dlg.close();
-      if (choice === "stop") this._press("stop");
+      if (choice !== "go") return;
+      if (this._asking === "stop") this._press("stop");
+      else if (this._asking === "restart") this._restart();
+    }
+
+    async _restart() {
+      if (await this._call("button", "press", { entity_id: this._cfg.entities.restart }, "restart")) this._info(this._s.restarting);
+    }
+
+    /* the pause at a line: the box, the line it is set to, and where the printer is */
+    _setLine() {
+      const input = this.shadowRoot.querySelector(".lineinput");
+      const n = Math.round(Number(input && input.value));
+      if (!input || !input.value || !Number.isFinite(n) || n < 1) { if (input) input.focus(); return; }
+      this._call("number", "set_value", { entity_id: this._cfg.entities.pause_at_line, value: n }, "line")
+        .then((ok) => { if (ok) { input.value = ""; this._refreshPos(); } });
+    }
+
+    _lineUpdate(active) {
+      const root = this.shadowRoot, s = this._s;
+      const box = root.querySelector(".line");
+      if (!box) return;
+      box.hidden = !active;
+      const ent = this._st("pause_at_line");
+      const target = ent && !["unavailable", "unknown"].includes(ent.state) ? num(ent.state) : null;
+      const armed = target != null && target > 0;
+      const pos = this._pos;
+      this._text(root.querySelector(".linepos"), pos && pos.available && pos.lines ? s.lineAt(this._n(pos.line), this._n(pos.lines)) : "");
+      let when = null;
+      if (armed && pos && pos.target === target && pos.eta != null) when = pos.eta < 60 ? s.soon : s.inAbout(duration(pos.eta, this._lang));
+      this._text(root.querySelector(".linestate"), armed ? s.pausesAt(this._n(target), when) : "");
+      const cancel = root.querySelector('[data-line="cancel"]');
+      if (cancel) cancel.hidden = !armed;
+      const off = !ent || ent.state === "unavailable";
+      root.querySelectorAll('.lineinput, [data-line="set"]').forEach((el) => { el.disabled = off; });
+    }
+
+    _startPos() {
+      if (this._posTimer) return;
+      this._posTimer = setInterval(() => this._refreshPos(), 3000);
+      this._refreshPos();
+    }
+
+    _stopPos() {
+      if (this._posTimer) { clearInterval(this._posTimer); this._posTimer = null; }
+      this._pos = null;
+    }
+
+    async _refreshPos() {
+      if (!this._hass || !this._cfg || this._posBusy) return;
+      this._posBusy = true;
+      try {
+        const msg = { type: "printer_panel/position" };
+        if (this._entryId) msg.entry_id = this._entryId;
+        this._pos = await this._hass.callWS(msg);
+      } catch (err) {
+        this._pos = null;
+      } finally {
+        this._posBusy = false;
+      }
+      if (!this._posTimer) this._pos = null;  // stopped while asking
+      const status = this._st("status");
+      this._lineUpdate(!!status && ACTIVE.includes(status.state));
+    }
+
+    _n(n) {
+      const lang = this._lang === "nb" ? "nb-NO" : ((this._hass.locale && this._hass.locale.language) || "en-GB");
+      try { return new Intl.NumberFormat(lang).format(n); } catch (err) { return String(n); }
+    }
+
+    /* a note under the buttons that is not a failure */
+    _info(text) {
+      const msg = this.shadowRoot.querySelector(".msg");
+      if (!msg) return;
+      msg.classList.add("info");
+      msg.textContent = text;
+      clearTimeout(this._msgTimer);
+      this._msgTimer = setTimeout(() => { msg.textContent = ""; msg.classList.remove("info"); }, 20000);
     }
 
     _press(act) {
@@ -712,6 +876,7 @@
       } catch (err) {
         const msg = this.shadowRoot.querySelector(".msg");
         if (msg) {
+          msg.classList.remove("info");
           msg.textContent = this._s.failed(this._s.verbs[verb] || this._s.verbs.set, (err && err.message) || String(err));
           clearTimeout(this._msgTimer);
           this._msgTimer = setTimeout(() => { msg.textContent = ""; }, 8000);
@@ -777,5 +942,5 @@
   });
 
   // for the tests
-  window.__printerPanel = { printName, duration, colour, slotLabel };
+  window.__printerPanel = { printName, duration, colour, slotLabel, repairSidebarIcons };
 })();
