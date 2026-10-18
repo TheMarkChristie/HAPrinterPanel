@@ -84,11 +84,13 @@ async def test_the_picture_is_the_print_then_the_camera(hass: HomeAssistant, k2p
         return phone[-1]["data"]
 
     assert (await pause())["image"] == f"/api/image_proxy/{preview}"
+    hass.states.async_set(preview, "unknown")        # after a restart: the picture is there, not yet changed
+    assert (await pause())["image"] == f"/api/image_proxy/{preview}"
     hass.states.async_set(preview, "unavailable")
     assert (await pause())["image"] == f"/api/camera_proxy/{camera}"
     hass.states.async_set(camera, "idle", {"snapshot_supported": False})
     assert "image" not in await pause()
-    assert len(phone) == 3
+    assert len(phone) == 4
 
 
 async def test_restarts_and_unwanted_events_tell_nobody(hass: HomeAssistant, k2plus, phone) -> None:

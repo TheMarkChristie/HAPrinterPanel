@@ -7,7 +7,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
@@ -100,9 +100,10 @@ class PrinterLink:
         """The notification's picture: the print's own (the slicer's picture of the model), which loads whenever there is
         a print; else the camera's still, unless the Creality integration says the camera cannot take one. Not the camera
         first: a WebRTC camera's still comes through go2rtc and can take longer than the ten seconds Home Assistant gives
-        it, and a phone that cannot fetch the picture shows none."""
+        it, and a phone that cannot fetch the picture shows none. An image entity's state is when its picture last
+        changed, so after a restart it is unknown while the picture is there."""
         preview = self._state("preview")
-        if preview and preview.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        if preview and preview.state != STATE_UNAVAILABLE:
             return f"/api/image_proxy/{preview.entity_id}"
         camera = self._state("camera")
         if camera and camera.state != STATE_UNAVAILABLE and camera.attributes.get("snapshot_supported") is not False:
