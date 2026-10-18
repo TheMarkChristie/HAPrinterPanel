@@ -1,0 +1,46 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Printer Panel",
+        "description": "A Printer page in the sidebar for a Creality printer set up with the Creality integration: the live camera, the print, the temperatures, the CFS colours, speed and fans, the light, and Pause, Resume and Stop.",
+        "data": {
+          "device_id": "Printer",
+          "title": "Sidebar title",
+          "notify": "Tell these phones",
+          "events": "When"
+        },
+        "data_description": {
+          "notify": "Notify services: a phone with the Home Assistant app is notify.mobile_app_<phone>.",
+          "events": "The notification has the camera's picture; tapping it opens the Printer page."
+        }
+      }
+    },
+    "abort": {
+      "no_printer": "No printer found. Set the printer up with the Creality integration (ha_creality_ws) first.",
+      "already_configured": "That printer already has a Printer page."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Printer Panel",
+        "data": {
+          "title": "Sidebar title",
+          "notify": "Tell these phones",
+          "events": "When"
+        }
+      }
+    }
+  },
+  "selector": {
+    "event": {
+      "options": {
+        "finished": "A print is finished",
+        "paused": "A print is paused",
+        "runout": "The filament runs out",
+        "error": "A print stops with an error"
+      }
+    }
+  }
+}
