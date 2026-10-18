@@ -152,13 +152,16 @@ async def test_a_pause_waits_while_the_print_is_paused_and_goes_when_it_ends(has
     number = _own(hass, k2plus, "number", "pause_at_line")
     await _set_line(hass, number, 800)
     key = f"{DOMAIN}.{entry.entry_id}.line_pause"
-    assert hass_storage[key]["data"] == {"line": 800, "file": FILE}
+    assert hass_storage[key]["data"] == {"counting": True, "line": 800, "file": FILE}
     printer.state = "paused"
     await _later(hass, 11)
     assert hass.states.get(number).state == "800", "paused by hand before the line: still waiting"
     printer.state = "cancelled"
     await _later(hass, 11)
-    assert hass.states.get(number).state == "0" and key not in hass_storage
+    assert hass.states.get(number).state == "800", "a paused print is looked at once a minute"
+    await _later(hass, 61)
+    assert hass.states.get(number).state == "0"
+    assert hass_storage[key]["data"] == {"counting": True, "line": None, "file": None}, "counting stays on"
 
 
 async def test_a_pause_at_a_line_outlives_a_restart_of_home_assistant(hass: HomeAssistant, k2plus, aioclient_mock) -> None:
@@ -214,10 +217,14 @@ async def test_the_page_is_told_where_the_printer_is(hass: HomeAssistant, k2plus
     Printer(aioclient_mock)
     client = await hass_ws_client(hass)
     await client.send_json({"id": 1, "type": f"{DOMAIN}/position"})
-    told = (await client.receive_json())["result"]
-    assert told == {"available": True, "target": None, "state": "printing", "line": 100, "lines": 1000, "eta": None}
-    await _set_line(hass, _own(hass, k2plus, "number", "pause_at_line"), 500)
+    assert (await client.receive_json())["result"] == {"counting": False, "target": None}
+    assert not aioclient_mock.mock_calls, "counting is off: the printer is asked nothing"
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _own(hass, k2plus, "switch", "count_lines")}, blocking=True)
     await client.send_json({"id": 2, "type": f"{DOMAIN}/position"})
+    told = (await client.receive_json())["result"]
+    assert told == {"counting": True, "available": True, "target": None, "state": "printing", "line": 100, "lines": 1000, "eta": None}
+    await _set_line(hass, _own(hass, k2plus, "number", "pause_at_line"), 500)
+    await client.send_json({"id": 3, "type": f"{DOMAIN}/position"})
     told = (await client.receive_json())["result"]
     assert told["target"] == 500 and told["eta"] == pytest.approx((500 - 100) * LINE / (100 * LINE / 600.0))
     pause = hass.config_entries.async_entries(DOMAIN)[0].runtime_data.line_pause
@@ -230,9 +237,10 @@ async def test_the_page_is_told_where_the_printer_is(hass: HomeAssistant, k2plus
 async def test_the_page_is_told_when_the_printer_cannot_be_reached(hass: HomeAssistant, k2plus, aioclient_mock, hass_ws_client) -> None:
     await _add(hass, k2plus)
     aioclient_mock.get(f"{BASE}/printer/objects/query", exc=aiohttp.ClientConnectionError("No route to host"))
+    await hass.services.async_call("switch", "turn_on", {"entity_id": _own(hass, k2plus, "switch", "count_lines")}, blocking=True)
     client = await hass_ws_client(hass)
     await client.send_json({"id": 1, "type": f"{DOMAIN}/position"})
-    assert (await client.receive_json())["result"] == {"available": False, "target": None, "error": "unreachable"}
+    assert (await client.receive_json())["result"] == {"counting": True, "available": False, "target": None, "error": "unreachable"}
 
 
 async def test_deleting_the_printer_deletes_its_pause(hass: HomeAssistant, k2plus, aioclient_mock, hass_storage) -> None:
@@ -243,3 +251,57 @@ async def test_deleting_the_printer_deletes_its_pause(hass: HomeAssistant, k2plu
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert f"{DOMAIN}.{entry.entry_id}.line_pause" not in hass_storage
+
+
+def _looks(aioclient_mock: AiohttpClientMocker) -> int:
+    """How many times the printer's place was asked for."""
+    return sum(1 for _method, url, *_ in aioclient_mock.mock_calls if str(url).startswith(f"{BASE}/printer/objects/query"))
+
+
+async def test_counting_is_a_switch_and_off_asks_the_printer_nothing(hass: HomeAssistant, k2plus, aioclient_mock, hass_storage) -> None:
+    entry = await _add(hass, k2plus)
+    Printer(aioclient_mock)
+    count = _own(hass, k2plus, "switch", "count_lines")
+    assert er.async_get(hass).async_get(count).device_id == k2plus["device_id"]
+    assert hass.states.get(count).state == "off", "off to begin with"
+    await _later(hass, 3600)
+    assert not aioclient_mock.mock_calls
+    await hass.services.async_call("switch", "turn_on", {"entity_id": count}, blocking=True)
+    key = f"{DOMAIN}.{entry.entry_id}.line_pause"
+    assert hass.states.get(count).state == "on" and hass_storage[key]["data"] == {"counting": True, "line": None, "file": None}
+    await _later(hass, 3600)
+    assert not aioclient_mock.mock_calls, "on, with no line and no page open: still nothing asked"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": count}, blocking=True)
+    assert hass.states.get(count).state == "off" and key not in hass_storage
+
+
+async def test_a_line_turns_counting_on_and_counting_off_drops_the_line(hass: HomeAssistant, k2plus, aioclient_mock) -> None:
+    entry = await _add(hass, k2plus)
+    Printer(aioclient_mock)
+    count, number = _own(hass, k2plus, "switch", "count_lines"), _own(hass, k2plus, "number", "pause_at_line")
+    await _set_line(hass, number, 500)
+    assert hass.states.get(count).state == "on" and hass.states.get(number).state == "500"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": count}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(count).state == "off" and hass.states.get(number).state == "0"
+    looks = _looks(aioclient_mock)
+    await _later(hass, 600)
+    assert _looks(aioclient_mock) == looks, "no more looks"
+    assert entry.runtime_data.line_pause._index is None, "and the print's lines are let go"
+
+
+async def test_far_off_it_looks_every_five_minutes_then_every_minute(hass: HomeAssistant, k2plus, aioclient_mock) -> None:
+    await _add(hass, k2plus)
+    printer = Printer(aioclient_mock, lines=40000)
+    printer.printing_for = 1e9  # no pace from the print's own average: the slowest assumed, 200 bytes a second
+    await _set_line(hass, _own(hass, k2plus, "number", "pause_at_line"), 39000)
+    looks = _looks(aioclient_mock)  # the line is about 48 minutes off
+    await _later(hass, 299)
+    assert _looks(aioclient_mock) == looks, "not before 5 minutes"
+    printer.line = 35000  # 4,000 lines (60,000 bytes, 5 minutes) short of the line by the next look
+    await _later(hass, 301)
+    assert _looks(aioclient_mock) == looks + 1
+    await _later(hass, 59)
+    assert _looks(aioclient_mock) == looks + 1, "under 10 minutes off: every minute, not sooner"
+    await _later(hass, 61)
+    assert _looks(aioclient_mock) == looks + 2

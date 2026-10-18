@@ -14,6 +14,7 @@ SOURCE_DOMAIN = "ha_creality_ws"          # the Creality integration whose entit
 
 RESTART_SUFFIX = "restart_printer"        # this integration's own entities on the printer's device: <device id>_<suffix>
 PAUSE_AT_LINE_SUFFIX = "pause_at_line"
+COUNT_SUFFIX = "count_lines"
 
 CONF_DEVICE = "device_id"
 CONF_TITLE = "title"

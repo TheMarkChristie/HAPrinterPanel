@@ -16,7 +16,7 @@ integration supports show whatever they report (no CFS, no CFS card; no chamber,
 | Camera | The printer's camera live, through Home Assistant's own picture card |
 | The print | Its name (from the file, without the slicer's `_PLA_9h1m52s`), a picture of the model, layer, progress, time left and the clock time it will be done |
 | Pause, Resume, Stop | Pause while printing, Resume while paused; Stop asks first, as a stopped print cannot be resumed |
-| Pause at line | While printing: the line the printer is at ("Line 341,202 of 495,870"), and a box to pause the print when it reaches a line, with how long until it does |
+| Pause at line | While printing, with Count G-code lines on: the line the printer is at ("Line 341,202 of 495,870"), and a box to pause the print when it reaches a line, with how long until it does |
 | Restart | Restarts the whole printer (asks first); not shown while a print is under way |
 | Light | The printer's light, on or off |
 | Temperatures | Nozzle, bed and chamber now, with their targets: type one, or step it by 5 °C |
@@ -61,17 +61,22 @@ phone instead of piling up. Only a change seen while Home Assistant is running c
 online after a restart, already finished, does not tell anybody again. A phone that has gone (its notify service no
 longer exists) is noted once in the log, and the others are still told.
 
-## Pause at a line, and Restart
+## Counting lines, pausing at one, and Restart
 
-Both are entities of Printer Panel's own on the printer's device, so automations and scripts can use them too:
+These are entities of Printer Panel's own on the printer's device, so automations and scripts can use them too:
 
+- **Count G-code lines** (`switch`, off to begin with): while it is off, Printer Panel asks the printer nothing. While
+  it is on and a print is under way, the page shows "Line X of Y" (asking every 10 seconds, only while the page is
+  open), and a line can be set to pause at. Counting reads the print's file from the printer once per print, to count
+  its lines. Setting a line turns it on; turning it off drops the line.
 - **Pause at G-code line** (`number`): set a line and the print pauses about a second after the printer reaches it;
-  0 means no pause. Home Assistant watches where the printer is in the file (every ten seconds while the line is far
-  off, four times a second once it is near) and presses the printer's own Pause. It is close, not exact: the printer
-  goes on for as long as the last look took, about a second, which is some tens of lines. The phone is told "... is
-  paused at line 400,018, as asked." A line already printed, a line past the end of the file, or nothing printing is
-  refused with the reason. The line is kept through a restart of Home Assistant; the print ending, or another print
-  starting, drops it. The file is read from the printer once per print to count its lines.
+  0 means no pause. Home Assistant looks at where the printer is in the file every 5 minutes while the line is more
+  than 10 minutes away, every minute until 2 minutes away, every 30 seconds until 1 minute, every 10 seconds, and every
+  second for the last 20 seconds (the time worked out from the printer's own pace), then presses the printer's own
+  Pause. So a line two hours off costs about 55 small looks, and the pause comes about a second after the line, some
+  tens of lines on a K2. The phone is told "... is paused at line 400,018, as asked." A line already printed, a line
+  past the end of the file, or nothing printing is refused with the reason. The line is kept through a restart of Home
+  Assistant; the print ending, or another print starting, drops it.
 - **Restart printer** (`button`): restarts the whole printer through Moonraker (`/machine/reboot`), like switching it
   off and on: the screen, the camera, the CFS and the firmware start again, and it is back in a minute or two. The page
   hides it while a print is under way; the button itself does what it is told, so an automation decides when.

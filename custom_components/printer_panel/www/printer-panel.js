@@ -70,6 +70,7 @@
       restart: "Restart", restartAsk: "Restart the printer?", restartPrinter: "Restart printer",
       restartHint: "It switches off and on again: the screen, the camera and the CFS restart, and it is back in a minute or two.",
       restarting: "Restarting the printer: it is back in a minute or two.",
+      countLines: "Count G-code lines",
       lineAt: (a, b) => `Line ${a} of ${b}`, pauseAt: "Pause at line", setLine: "Set", cancelLine: "Cancel",
       pausesAt: (n, when) => `Pauses at line ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `in about ${t}`, soon: "any moment now",
       lineHint: "It pauses about a second after the printer reaches the line.",
@@ -100,6 +101,7 @@
       restart: "Omstart", restartAsk: "Starte skriveren på nytt?", restartPrinter: "Start skriveren på nytt",
       restartHint: "Den slås av og på igjen: skjermen, kameraet og CFS starter på nytt, og den er tilbake om et minutt eller to.",
       restarting: "Starter skriveren på nytt: den er tilbake om et minutt eller to.",
+      countLines: "Tell G-kode-linjer",
       lineAt: (a, b) => `Linje ${a} av ${b}`, pauseAt: "Pause ved linje", setLine: "Sett", cancelLine: "Avbryt",
       pausesAt: (n, when) => `Pauser ved linje ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `om omtrent ${t}`, soon: "når som helst nå",
       lineHint: "Den pauser omtrent et sekund etter at skriveren når linjen.",
@@ -204,6 +206,8 @@
     .msg:empty { display: none; }
     .btn.small { min-height: 36px; padding: 0 12px; }
     .line { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider-color); }
+    .lineon { display: grid; gap: 6px; }
+    .countrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 14px; }
     .linepos { font-size: 14px; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
     .lineset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
     .lineset label { display: flex; align-items: center; gap: 8px; font-size: 14px; }
@@ -364,13 +368,17 @@
                   ${has("light") ? `<button class="btn" data-act="light" aria-pressed="false"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>${esc(s.light)}</button>` : ""}
                   ${has("restart") ? `<button class="btn" data-act="restart" hidden><ha-icon icon="mdi:restart"></ha-icon>${esc(s.restart)}</button>` : ""}
                 </div>
-                ${has("pause_at_line") ? `<div class="line" hidden>
-                  <div class="linepos"></div>
-                  <div class="lineset"><label>${esc(s.pauseAt)}<input class="lineinput" type="number" inputmode="numeric" min="1" step="1"></label>
-                    <button class="btn small" data-line="set">${esc(s.setLine)}</button>
-                    <button class="btn small" data-line="cancel" hidden>${esc(s.cancelLine)}</button></div>
-                  <div class="linestate" role="status"></div>
-                  <div class="linehint">${esc(s.lineHint)}</div>
+                ${has("pause_at_line") && has("count_lines") ? `<div class="line" hidden>
+                  <div class="countrow"><span>${esc(s.countLines)}</span>
+                    <button class="switch" data-count aria-pressed="false" aria-label="${esc(s.countLines)}">${esc(s.offW)}</button></div>
+                  <div class="lineon" hidden>
+                    <div class="linepos"></div>
+                    <div class="lineset"><label>${esc(s.pauseAt)}<input class="lineinput" type="number" inputmode="numeric" min="1" step="1"></label>
+                      <button class="btn small" data-line="set">${esc(s.setLine)}</button>
+                      <button class="btn small" data-line="cancel" hidden>${esc(s.cancelLine)}</button></div>
+                    <div class="linestate" role="status"></div>
+                    <div class="linehint">${esc(s.lineHint)}</div>
+                  </div>
                 </div>` : ""}
                 <div class="msg" role="status" aria-live="polite"></div>
                 <div class="offline"></div>
@@ -412,6 +420,7 @@
         else if (t.dataset.mode) this._setNumber("speed", Number(t.dataset.mode));
         else if (t.dataset.line === "set") this._setLine();
         else if (t.dataset.line === "cancel") this._call("number", "set_value", { entity_id: this._cfg.entities.pause_at_line, value: 0 }, "line");
+        else if (t.hasAttribute("data-count")) this._call("switch", this._counting() ? "turn_off" : "turn_on", { entity_id: this._cfg.entities.count_lines }, "set");
         else if (t.classList.contains("switch")) this._call("fan", "toggle", { entity_id: this._cfg.entities[t.closest("[data-fan]").dataset.fan] }, "set");
       });
       root.addEventListener("change", (ev) => {
@@ -604,9 +613,10 @@
       if (restartBtn) restartBtn.hidden = active;
       this._text(root.querySelector(".offline"), online ? "" : s.offline);
 
-      // the pause at a line, and where the printer is in the file (asked every few seconds while a print is under way)
+      // the pause at a line, and where the printer is in the file: asked every 10 seconds, only while counting is on, a
+      // print is under way and this page is open
       this._lineUpdate(active);
-      if (active && this.isConnected && this._cfg.entities.pause_at_line) this._startPos(); else this._stopPos();
+      if (active && this._counting() && this.isConnected && this._cfg.entities.pause_at_line) this._startPos(); else this._stopPos();
 
       // temperatures
       root.querySelectorAll("[data-temp]").forEach((row) => {
@@ -778,11 +788,23 @@
         .then((ok) => { if (ok) { input.value = ""; this._refreshPos(); } });
     }
 
+    _counting() {
+      const st = this._st("count_lines");
+      return !!st && st.state === "on";
+    }
+
     _lineUpdate(active) {
       const root = this.shadowRoot, s = this._s;
       const box = root.querySelector(".line");
       if (!box) return;
       box.hidden = !active;
+      const counting = this._counting(), count = root.querySelector("[data-count]"), countSt = this._st("count_lines");
+      if (count) {
+        count.setAttribute("aria-pressed", String(counting));
+        this._text(count, counting ? s.onW : s.offW);
+        count.disabled = !countSt || countSt.state === "unavailable";
+      }
+      root.querySelector(".lineon").hidden = !counting;
       const ent = this._st("pause_at_line");
       const target = ent && !["unavailable", "unknown"].includes(ent.state) ? num(ent.state) : null;
       const armed = target != null && target > 0;
@@ -799,7 +821,7 @@
 
     _startPos() {
       if (this._posTimer) return;
-      this._posTimer = setInterval(() => this._refreshPos(), 3000);
+      this._posTimer = setInterval(() => this._refreshPos(), 10000);
       this._refreshPos();
     }
 

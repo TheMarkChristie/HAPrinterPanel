@@ -21,13 +21,15 @@ ROOT = os.path.dirname(HERE)
 SCRIPT = os.path.join(ROOT, "custom_components", "printer_panel", "www", "printer-panel.js")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 FIXTURE = json.load(open(os.path.join(HERE, "fixtures", "k2plus.json"), encoding="utf-8"))
-RESTART, PAUSE_AT = "button.k2plus_235d_restart_printer", "number.k2plus_235d_pause_at_g_code_line"
+RESTART, PAUSE_AT, COUNT = ("button.k2plus_235d_restart_printer", "number.k2plus_235d_pause_at_g_code_line",
+                            "switch.k2plus_235d_count_g_code_lines")
 CONFIG = {"entry_id": "e1", "title": "Printer", "path": "printer", "device_id": "k2plus", "name": "K2Plus-235D", "model": "K2 Plus",
           **p.resolve(FIXTURE["registry"])}
-CONFIG["entities"].update(restart=RESTART, pause_at_line=PAUSE_AT)
+CONFIG["entities"].update(restart=RESTART, pause_at_line=PAUSE_AT, count_lines=COUNT)
 STATES = {s["entity_id"]: s for s in FIXTURE["states"]}
 STATES[RESTART] = {"entity_id": RESTART, "state": "unknown", "attributes": {"device_class": "restart"}}
 STATES[PAUSE_AT] = {"entity_id": PAUSE_AT, "state": "0", "attributes": {"min": 0, "max": 99999999, "step": 1, "mode": "box"}}
+STATES[COUNT] = {"entity_id": COUNT, "state": "off", "attributes": {}}
 
 STANDINS = r"""
 customElements.define("home-assistant", class extends HTMLElement {});
@@ -44,7 +46,8 @@ let states = JSON.parse(JSON.stringify(STATES));
 window.POS = { available: true, target: null, state: "printing", line: 341202, lines: 495870, eta: null };
 const mk = (lang) => ({ states, locale: { language: lang, time_format: "24", time_zone: "local" }, config: { time_zone: "Europe/Oslo" },
   language: lang, hassUrl: (u) => u,
-  callWS: async (m) => (m.type === "printer_panel/config" ? CONFIG : m.type === "printer_panel/position" ? JSON.parse(JSON.stringify(window.POS)) : null),
+  callWS: async (m) => { if (m.type === "printer_panel/position") window.POS_ASKED = (window.POS_ASKED || 0) + 1;
+    return m.type === "printer_panel/config" ? CONFIG : m.type === "printer_panel/position" ? JSON.parse(JSON.stringify(window.POS)) : null; },
   callService: async (d, s, data) => { calls.push(`${d}.${s} ${JSON.stringify(data)}`); if (window.REFUSE) throw new Error(window.REFUSE); } });
 const set = (id, state) => { states = JSON.parse(JSON.stringify(states)); states[id] = { ...states[id], state }; panel.hass = mk("en"); };
 const panel = document.createElement("printer-panel");
@@ -61,6 +64,7 @@ const pictures = async () => {
   states = JSON.parse(JSON.stringify(STATES));
   states[cam].attributes.entity_picture = "../custom_components/printer_panel/brand/logo@2x.png?token=x";
   states[pre].attributes.entity_picture = "../custom_components/printer_panel/brand/icon.png?token=x";
+  states[COUNT_ID] = { ...states[COUNT_ID], state: "on" };
   panel.hass = mk("en"); panel._snapshot(); await wait(300);
 };
 (async () => {
@@ -71,7 +75,7 @@ const pictures = async () => {
   out(`header: ${txt(".bar .title")} | status ${txt(".bar .status")}`);
   out(`print: ${txt(".name")} | ${txt(".sub")} | ${txt(".pct")} | ${txt(".times").replace(/\s+/g, " ")}`);
   out(`buttons: pause ${vis('[data-act="pause"]')}, resume ${vis('[data-act="resume"]')}, stop ${vis('[data-act="stop"]')}, restart ${vis('[data-act="restart"]')}, light pressed ${q('[data-act="light"]').getAttribute("aria-pressed")}`);
-  out(`line: box ${vis(".line")} | "${txt(".linepos")}" | armed "${txt(".linestate")}" | cancel ${vis('[data-line="cancel"]')}`);
+  out(`counting off: line box ${vis(".line")} | toggle "${txt("[data-count]")}" | counter and box ${vis(".lineon")} | position asked ${window.POS_ASKED || 0}`);
   out(`temperatures: ${[...r.querySelectorAll("[data-temp]")].map((row) => `${row.querySelector(".what").textContent} ${row.querySelector(".now").textContent} target ${row.querySelector("input") ? row.querySelector("input").value : "-"}`).join(" | ")}`);
   out(`speed: ${txt("[data-speed] .now")} | modes pressed: ${[...r.querySelectorAll(".mode")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent).join(",")}`);
   out(`fans: ${[...r.querySelectorAll("[data-fan]")].map((row) => `${row.firstElementChild.textContent} ${row.querySelector(".val").textContent} ${row.querySelector(".switch").textContent}`).join(" | ")}`);
@@ -106,7 +110,11 @@ const pictures = async () => {
   out(`refused: "${txt(".msg")}"`);
   window.REFUSE = null;
   calls.length = 0;
-  // the pause at a line
+  // the pause at a line: counting on first
+  q("[data-count]").click(); await wait(20);
+  out(`count on -> ${calls.pop()}`);
+  set(COUNT_ID, "on"); await wait(60);
+  out(`counting on: toggle "${txt("[data-count]")}" | counter and box ${vis(".lineon")} | "${txt(".linepos")}" | position asked ${window.POS_ASKED}`);
   const line = q(".lineinput");
   q('[data-line="set"]').click(); await wait(20);
   out(`set with an empty box -> ${calls.length ? calls.pop() : "nothing asked"}`);
@@ -136,6 +144,7 @@ const pictures = async () => {
   // Norwegian
   window.POS = { ...window.POS, target: 400000, eta: 725 };
   states[PAUSE_AT_ID] = { ...states[PAUSE_AT_ID], state: "400000" };
+  states[COUNT_ID] = { ...states[COUNT_ID], state: "on" };
   panel.hass = mk("nb"); await panel._refreshPos(); await wait(30);
   out(`nb: ${txt(".bar .status")} | ${txt(".times").replace(/\s+/g, " ")} | ${txt('[data-act="pause"]')} | "${txt(".linepos")}" | "${txt(".linestate")}"`);
   // idle: Restart shows, asks, restarts
@@ -167,7 +176,7 @@ def page(width: int, checks: bool) -> str:
             "<script>window.onerror=function(m,s,l){document.getElementById('out').textContent+='ERROR '+m+' @'+l+'\\n'}</script>"
             f"<script>{STANDINS}</script><script>{open(SCRIPT, encoding='utf-8').read()}</script>"
             f"<script>const STATES={json.dumps(STATES)};const CONFIG={json.dumps(CONFIG)};const CHECK={json.dumps(checks)};"
-            f"const PAUSE_AT_ID={json.dumps(PAUSE_AT)};{CHECKS}</script>"
+            f"const PAUSE_AT_ID={json.dumps(PAUSE_AT)};const COUNT_ID={json.dumps(COUNT)};{CHECKS}</script>"
             "</body></html>")
 
 

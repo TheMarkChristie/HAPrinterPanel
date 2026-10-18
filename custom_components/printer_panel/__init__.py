@@ -25,7 +25,7 @@ from .linepause import STORE_VERSION
 from .link import PrinterLink
 
 WWW = Path(__file__).parent / "www"
-PLATFORMS = [Platform.BUTTON, Platform.NUMBER]
+PLATFORMS = [Platform.BUTTON, Platform.NUMBER, Platform.SWITCH]
 _STATIC = f"{DOMAIN}_static"
 _SCRIPT_URL = f"{DOMAIN}_script_url"
 

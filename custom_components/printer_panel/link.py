@@ -13,8 +13,8 @@ from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import (CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, DEFAULT_EVENTS, DEFAULT_TITLE, DOMAIN,
-                    PAUSE_AT_LINE_SUFFIX, RESTART_SUFFIX, SOURCE_DOMAIN)
+from .const import (CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, COUNT_SUFFIX, DEFAULT_EVENTS, DEFAULT_TITLE,
+                    DOMAIN, PAUSE_AT_LINE_SUFFIX, RESTART_SUFFIX, SOURCE_DOMAIN)
 from .linepause import LinePause
 from .moonraker import Moonraker, MoonrakerError
 from .printer import filament_event, message, print_event, print_name, resolve
@@ -67,9 +67,11 @@ class PrinterLink:
         return Moonraker(async_get_clientsession(self.hass), host)
 
     def _own(self) -> dict[str, str]:
-        """This integration's own entities on the printer: Restart printer, Pause at G-code line (unless disabled)."""
+        """This integration's own entities on the printer: Restart printer, Pause at G-code line, Count G-code lines
+        (unless disabled)."""
         registry, found = er.async_get(self.hass), {}
-        for what, platform, suffix in (("restart", "button", RESTART_SUFFIX), ("pause_at_line", "number", PAUSE_AT_LINE_SUFFIX)):
+        for what, platform, suffix in (("restart", "button", RESTART_SUFFIX), ("pause_at_line", "number", PAUSE_AT_LINE_SUFFIX),
+                                       ("count_lines", "switch", COUNT_SUFFIX)):
             entity_id = registry.async_get_entity_id(platform, DOMAIN, f"{self.device_id}_{suffix}")
             entry = registry.async_get(entity_id) if entity_id else None
             if entry and not entry.disabled_by:

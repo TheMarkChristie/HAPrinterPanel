@@ -53,6 +53,11 @@
       "pause_at_line": {
         "name": "Pause at G-code line"
       }
+    },
+    "switch": {
+      "count_lines": {
+        "name": "Count G-code lines"
+      }
     }
   },
   "exceptions": {

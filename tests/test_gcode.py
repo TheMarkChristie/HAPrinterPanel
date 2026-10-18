@@ -40,6 +40,20 @@ def test_an_empty_file_has_no_lines():
         index.end_of(1)
 
 
+def test_the_looks_space_out_by_how_far_off_the_line_is():
+    from custom_components.printer_panel.gcode import next_look
+    minutes = 60.0
+    assert next_look(3 * 60 * minutes) == 300, "hours off: every 5 minutes"
+    assert next_look(10 * minutes + 1) == 300
+    assert next_look(10 * minutes) == 60 and next_look(2 * minutes + 1) == 60, "10 to 2 minutes: every minute"
+    assert next_look(2 * minutes) == 30 and next_look(61) == 30, "2 to 1 minute: every 30 seconds"
+    assert next_look(60) == 10 and next_look(21) == 10, "the last minute: every 10 seconds"
+    assert next_look(20) == 1 and next_look(0) == 1 and next_look(-5) == 1, "the last 20 seconds: every second"
+    assert next_look(7 * minutes) == 60 and next_look(90) == 30 and next_look(30) == 10
+    assert next_look(11 * minutes) == 300 and next_look(25) == 10, "never more than half the time left"
+    assert next_look(10.5 * minutes) == 300 and next_look(15) == 1
+
+
 def test_a_pause_at_a_line_says_the_line():
     assert p.message("paused_line", "en", "GTA 6 stand - Warden of Bacon", 68, None, 400018) == (
         "3D printer", "GTA 6 stand - Warden of Bacon is paused at line 400,018, as asked.")

@@ -1,8 +1,10 @@
-"""Pause at a G-code line: Home Assistant watches where the printer is in the file it is printing (Moonraker) and presses
-the printer's own Pause as soon as it has read that line. Close, not exact (Mark's choice, 18 Oct 2026): the printer goes
-on for as long as the last look took, about a second. It looks every ten seconds while the line is far off, and four
-times a second once it is near. The line is kept in storage, so Home Assistant restarting mid-print keeps it; the print
-ending, or another one starting, drops it."""
+"""Count G-code lines, and pause at one. While counting is on (the Count G-code lines switch), Printer Panel follows where
+the printer is in the file it is printing, through its Moonraker: the page's "Line X of Y", and Pause at G-code line,
+which presses the printer's own Pause once it has read the line. While counting is off it asks the printer nothing (Mark,
+18 Oct 2026). On the way to a line it looks every 5 minutes while the line is more than 10 minutes off, then more often
+the nearer it gets, every second for the last 20 seconds (gcode.next_look), so the pause comes about a second after the
+line. The switch and the line are kept in storage, so Home Assistant restarting mid-print keeps them; the print ending,
+or another one starting, drops the line."""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +19,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .gcode import LineIndex
+from .gcode import LineIndex, next_look
 from .moonraker import MoonrakerError, Place
 
 if TYPE_CHECKING:
@@ -27,8 +29,8 @@ _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
 UNDER_WAY = ("printing", "paused")   # Moonraker's print states while there is a print
-FAR = 10.0                           # seconds between looks while the line is far off
-NEAR = 0.25                          # and once it is close
+WHILE_PAUSED = 60.0                  # seconds between looks while the print is paused short of the line
+AFTER_FAILURE = 10.0                 # and after a look that could not reach the printer
 MIN_PACE = 200.0                     # bytes a second assumed at least, so a fast stretch is not slept through
 FRESH = 1.5                          # a look this recent also answers the page
 FIRE_TRIES = 4                       # presses of Pause before giving up
@@ -47,6 +49,7 @@ class LinePause:
     def __init__(self, link: PrinterLink) -> None:
         self.link = link
         self.hass = link.hass
+        self.counting = False            # the Count G-code lines switch
         self.target: int | None = None   # the line, counted from 1
         self.file: str | None = None     # the print it is for
         self._end: int | None = None     # the position at which the printer has read the line
@@ -64,13 +67,35 @@ class LinePause:
         self._job = HassJob(self._poll_later, f"{DOMAIN} line pause", cancel_on_shutdown=True)
 
     async def async_load(self) -> None:
-        """Take up a line set before Home Assistant restarted: the first look checks it is still the same print."""
+        """Take up the switch, and a line set before Home Assistant restarted: the first look checks it is still the
+        same print."""
         data = await self._store.async_load() or {}
         line, file = data.get("line"), data.get("file")
+        self.counting = bool(data.get("counting"))
         if isinstance(line, int) and line > 0 and file:
-            self.target, self.file = line, str(file)
-            self._changed()
+            self.counting, self.target, self.file = True, line, str(file)
             self._schedule(0)
+        self._changed()
+
+    async def set_counting(self, on: bool) -> None:
+        """The Count G-code lines switch. Off drops a line set to pause at, and asks the printer nothing more."""
+        if on == self.counting:
+            return
+        self.counting = on
+        if not on:
+            self.forget_lines()
+            if self.target is not None:
+                _LOGGER.info("Printer Panel: counting is off, so the pause at line %s is dropped", self.target)
+                self.stop()
+                self.target = self.file = self._end = None
+        await self._save()
+        self._changed()
+
+    async def _save(self) -> None:
+        if not self.counting and self.target is None:
+            await self._store.async_remove()
+        else:
+            await self._store.async_save({"counting": self.counting, "line": self.target, "file": self.file})
 
     @callback
     def stop(self) -> None:
@@ -122,18 +147,12 @@ class LinePause:
             return index
 
     async def arm(self, line: int) -> None:
-        """Pause when the printer has read this line (counted from 1); 0 drops the pause. Says why not when it cannot:
-        nothing printing, the line already printed, a line past the end, the printer out of reach."""
+        """Pause when the printer has read this line (counted from 1); 0 drops the pause. Turns counting on. Says why not
+        when it cannot: nothing printing, the line already printed, a line past the end, the printer out of reach."""
         if line < 1:
             await self.disarm()
             return
-        try:
-            place = await self.look()
-            if place.state not in UNDER_WAY or not place.file:
-                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="not_printing")
-            index = await self.lines(place)
-        except MoonrakerError as err:
-            raise moonraker_error(err) from err
+        place, index = await self._checked_place()
         if line > index.lines:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="line_beyond",
                                      translation_placeholders={"line": str(line), "lines": str(index.lines)})
@@ -141,19 +160,28 @@ class LinePause:
         if at >= line:
             raise HomeAssistantError(translation_domain=DOMAIN, translation_key="line_passed",
                                      translation_placeholders={"line": str(line), "at": str(at)})
-        self.target, self.file, self._end = line, place.file, index.end_of(line)
+        self.counting, self.target, self.file, self._end = True, line, place.file, index.end_of(line)
         self._failures = self._fire_tries = 0
-        await self._store.async_save({"line": line, "file": place.file})
+        await self._save()
         _LOGGER.info("Printer Panel: will pause at line %s of %s (the printer is at line %s)", line, index.lines, at)
         self._changed()
-        self._schedule(0)
+        self._plan(place)
+
+    async def _checked_place(self) -> tuple[Place, LineIndex]:
+        try:
+            place = await self.look()
+            if place.state not in UNDER_WAY or not place.file:
+                raise HomeAssistantError(translation_domain=DOMAIN, translation_key="not_printing")
+            return place, await self.lines(place)
+        except MoonrakerError as err:
+            raise moonraker_error(err) from err
 
     async def disarm(self) -> None:
         self.stop()
         if self.target is None and self.file is None:
             return
         self.target = self.file = self._end = None
-        await self._store.async_remove()
+        await self._save()
         self._changed()
 
     @callback
@@ -170,7 +198,7 @@ class LinePause:
             await self._poll()
         except Exception:  # noqa: BLE001  (the watch must not end quietly)
             _LOGGER.exception("Printer Panel: watching for line %s failed; looking again", self.target)
-            self._schedule(FAR)
+            self._schedule(AFTER_FAILURE)
 
     async def _poll(self) -> None:
         try:
@@ -181,7 +209,7 @@ class LinePause:
             if self._failures == 3:
                 _LOGGER.warning("Printer Panel: cannot see where the printer is (%s); still watching for line %s",
                                 err.detail or err.key, self.target)
-            self._schedule(5.0)
+            self._schedule(AFTER_FAILURE)
             return
         self._failures = 0
         if index is None:
@@ -200,11 +228,22 @@ class LinePause:
             else:  # paused by hand at or after the line: nothing left to do
                 await self.disarm()
             return
-        if place.state != "printing":  # paused before the line: wait for the resume
-            self._schedule(FAR)
-            return
-        pace = max(MIN_PACE, *self._paces) if self._paces else MIN_PACE
-        self._schedule(min(FAR, max(NEAR, (self._end - place.position) / pace / 3)))
+        self._plan(place)
+
+    @callback
+    def _plan(self, place: Place) -> None:
+        """The next look, from this one: a minute while the print is paused short of the line (waiting for the resume),
+        else by how far off the line is in time."""
+        if place.state != "printing" or self._end is None:
+            self._schedule(WHILE_PAUSED)
+        else:
+            self._schedule(next_look((self._end - place.position) / self._pace(place)))
+
+    def _pace(self, place: Place) -> float:
+        """Bytes a second, on the fast side, so the line is not slept past: the fastest of the paces seen between recent
+        looks and the print's own average, and at least MIN_PACE."""
+        average = place.position / place.printing_for if place.printing_for > 0 else 0.0
+        return max(MIN_PACE, average, *self._paces)
 
     async def _fire(self, at: int) -> None:
         pause = self.link.map["entities"].get("pause")
@@ -225,8 +264,11 @@ class LinePause:
         await self.disarm()
 
     async def position(self) -> dict[str, Any]:
-        """For the page: the line the printer is at, of how many, the line it will pause at, and in about how long."""
-        out: dict[str, Any] = {"available": False, "target": self.target}
+        """For the page: the line the printer is at, of how many, the line it will pause at, and in about how long.
+        Nothing is asked of the printer while counting is off."""
+        if not self.counting:
+            return {"counting": False, "target": None}
+        out: dict[str, Any] = {"counting": True, "available": False, "target": self.target}
         try:
             place = await self.look(FRESH)
             if place.state not in UNDER_WAY or not place.file:
