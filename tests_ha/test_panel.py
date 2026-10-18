@@ -68,7 +68,27 @@ async def test_a_finished_print_tells_the_phone_with_its_name_and_time(hass: Hom
     assert len(phone) == 1
     sent = phone[0]
     assert sent["title"] == "3D printer" and sent["message"] == "GTA 6 stand - Warden of Bacon is finished, after 9 h 2 min."
-    assert sent["data"]["clickAction"] == "/printer" and sent["data"]["image"] == f"/api/camera_proxy/{k2plus['printer_camera']}"
+    assert sent["data"]["clickAction"] == "/printer" and sent["data"]["image"] == f"/api/image_proxy/{k2plus['current_print_preview']}"
+
+
+async def test_the_picture_is_the_print_then_the_camera(hass: HomeAssistant, k2plus, phone) -> None:
+    """The print's own picture; without one, the camera's still; from a camera that cannot take one, no picture."""
+    await _add(hass, k2plus, events=["paused"])
+    status, preview, camera = k2plus["print_status"], k2plus["current_print_preview"], k2plus["printer_camera"]
+
+    async def pause() -> dict:
+        hass.states.async_set(status, "printing", {"file": STATUS_FILE})
+        await hass.async_block_till_done()
+        hass.states.async_set(status, "paused", {"file": STATUS_FILE})
+        await hass.async_block_till_done()
+        return phone[-1]["data"]
+
+    assert (await pause())["image"] == f"/api/image_proxy/{preview}"
+    hass.states.async_set(preview, "unavailable")
+    assert (await pause())["image"] == f"/api/camera_proxy/{camera}"
+    hass.states.async_set(camera, "idle", {"snapshot_supported": False})
+    assert "image" not in await pause()
+    assert len(phone) == 3
 
 
 async def test_restarts_and_unwanted_events_tell_nobody(hass: HomeAssistant, k2plus, phone) -> None:

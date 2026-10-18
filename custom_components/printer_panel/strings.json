@@ -12,7 +12,7 @@
         },
         "data_description": {
           "notify": "Notify services: a phone with the Home Assistant app is notify.mobile_app_<phone>.",
-          "events": "The notification has the camera's picture; tapping it opens the Printer page."
+          "events": "The notification shows a picture of the print; tapping it opens the Printer page."
         }
       }
     },

@@ -775,7 +775,7 @@
    "entity_id": "camera.3d_printer_room_k2plus_235d_cfs_printer_camera",
    "state": "idle",
    "attributes": {
-    "access_token": "e1e451edd71a82028d845ee99e2dc619c1d06146db7dc60d3bf0155faa1d87e5",
+    "access_token": "test",
     "snapshot_supported": true,
     "go2rtc_stream_name": null,
     "go2rtc_version": "1.9.14",
@@ -993,7 +993,7 @@
    "entity_id": "image.3d_printer_room_k2plus_235d_cfs_current_print_preview",
    "state": "2026-10-18T17:40:15.296405+00:00",
    "attributes": {
-    "access_token": "60523b3890658ae51cc67480237747dbe9981dfbe880db3f9930b786e38fd861",
+    "access_token": "test",
     "preview_reason": "ok",
     "source_url": "https://192.0.2.60/downloads/original/current_print_image.png",
     "entity_picture": "/api/image_proxy/image.3d_printer_room_k2plus_235d_cfs_current_print_preview?token=test",

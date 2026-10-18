@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
@@ -95,9 +96,22 @@ class PrinterLink:
         entity_id = self.map["entities"].get(what)
         return self.hass.states.get(entity_id) if entity_id else None
 
+    def _picture(self) -> str | None:
+        """The notification's picture: the print's own (the slicer's picture of the model), which loads whenever there is
+        a print; else the camera's still, unless the Creality integration says the camera cannot take one. Not the camera
+        first: a WebRTC camera's still comes through go2rtc and can take longer than the ten seconds Home Assistant gives
+        it, and a phone that cannot fetch the picture shows none."""
+        preview = self._state("preview")
+        if preview and preview.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return f"/api/image_proxy/{preview.entity_id}"
+        camera = self._state("camera")
+        if camera and camera.state != STATE_UNAVAILABLE and camera.attributes.get("snapshot_supported") is not False:
+            return f"/api/camera_proxy/{camera.entity_id}"
+        return None
+
     def notification(self, what: str) -> dict[str, Any]:
-        """The notification for an event: its title, text and the phone app's extras (the camera's picture, and a tap that
-        opens the Printer page)."""
+        """The notification for an event: its title, text and the phone app's extras (a picture of the print, and a tap
+        that opens the Printer page)."""
         status, material = self._state("status"), self._state("material")
         name = print_name(status.attributes.get("file") if status else None) \
             or print_name(material.attributes.get("gcode_file") if material else None)
@@ -108,8 +122,8 @@ class PrinterLink:
         title, text = message(what, self.hass.config.language, name, progress, job)
         data: dict[str, Any] = {"tag": f"printer_panel_{self.entry.entry_id}", "group": "printer",
                                 "clickAction": f"/{self.path}", "url": f"/{self.path}"}
-        if camera := self.map["entities"].get("camera"):
-            data["image"] = f"/api/camera_proxy/{camera}"
+        if picture := self._picture():
+            data["image"] = picture
         return {"title": title, "message": text, "data": data}
 
     async def _notify(self, what: str) -> None:

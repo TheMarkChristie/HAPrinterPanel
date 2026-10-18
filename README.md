@@ -52,8 +52,9 @@ entry_id: 01J...   # optional: which printer, when there is more than one
 | The filament runs out | GTA 6 stand - Warden of Bacon: the filament ran out at 56 %. |
 | A print stops with an error | GTA 6 stand - Warden of Bacon stopped with an error at 56 %. |
 
-The title is "3D printer"; the text is in Home Assistant's language (English or Norwegian). The notification carries
-the camera's picture, and tapping it opens the Printer page. Each printer's notifications replace each other on the
+The title is "3D printer"; the text is in Home Assistant's language (English or Norwegian). The notification shows the
+picture of the print (the slicer's picture of the model, or the camera's still when the print has none), and tapping
+it opens the Printer page, with the live camera. Each printer's notifications replace each other on the
 phone instead of piling up. Only a change seen while Home Assistant is running counts: a printer that comes back
 online after a restart, already finished, does not tell anybody again. A phone that has gone (its notify service no
 longer exists) is noted once in the log, and the others are still told.
@@ -76,6 +77,9 @@ notifications working. A disabled entity is left off the page. The page asks the
   Assistant.
 - No notification: check the phone is ticked under Configure and the event is chosen; the phone's notify service
   (`notify.mobile_app_<phone>`) must exist in Developer tools > Actions.
+- Why the notification shows the model, not the camera: the K2's camera is WebRTC, and a still from it comes through
+  go2rtc, which can take longer than Home Assistant waits for one; a phone that cannot fetch the picture shows none.
+  The slicer's picture is always there while there is a print.
 
 ## Development
 
