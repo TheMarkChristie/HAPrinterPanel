@@ -121,6 +121,8 @@ class PrinterLink:
         before, after = (old.state if old else None), (new.state if new else None)
         if event.data["entity_id"] == self.map["entities"].get("status"):
             what = print_event(before, after)
+            if after in ("completed", "stopped", "error", "idle"):
+                self.line_pause.forget_lines()
         else:
             what = filament_event(before, after)
         line = self.line_pause.take_fired() if what == "paused" else None

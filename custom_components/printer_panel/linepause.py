@@ -84,6 +84,11 @@ class LinePause:
         return lambda: self._listeners.remove(listener)
 
     @callback
+    def forget_lines(self) -> None:
+        """The print is over: let its lines go (about 4 MB for a 13 MB file)."""
+        self._index = None
+
+    @callback
     def take_fired(self) -> int | None:
         """The line the printer had reached when this paused it, if that was just now; once."""
         fired, self._fired = self._fired, None
@@ -181,6 +186,7 @@ class LinePause:
         self._failures = 0
         if index is None:
             _LOGGER.info("Printer Panel: the print ended or changed; the pause at line %s is dropped", self.target)
+            self.forget_lines()
             await self.disarm()
             return
         if self._end is None:  # taken up after a restart
@@ -224,7 +230,7 @@ class LinePause:
         try:
             place = await self.look(FRESH)
             if place.state not in UNDER_WAY or not place.file:
-                self._index = None  # the print is over: let its lines go
+                self.forget_lines()
                 return {**out, "available": True, "state": place.state}
             index = await self.lines(place)
         except MoonrakerError as err:

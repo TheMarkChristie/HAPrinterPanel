@@ -220,6 +220,11 @@ async def test_the_page_is_told_where_the_printer_is(hass: HomeAssistant, k2plus
     await client.send_json({"id": 2, "type": f"{DOMAIN}/position"})
     told = (await client.receive_json())["result"]
     assert told["target"] == 500 and told["eta"] == pytest.approx((500 - 100) * LINE / (100 * LINE / 600.0))
+    pause = hass.config_entries.async_entries(DOMAIN)[0].runtime_data.line_pause
+    assert pause._index is not None, "the print's lines, read once"
+    hass.states.async_set(k2plus["print_status"], "completed", {"file": FILE})
+    await hass.async_block_till_done()
+    assert pause._index is None, "let go when the print is over"
 
 
 async def test_the_page_is_told_when_the_printer_cannot_be_reached(hass: HomeAssistant, k2plus, aioclient_mock, hass_ws_client) -> None:
