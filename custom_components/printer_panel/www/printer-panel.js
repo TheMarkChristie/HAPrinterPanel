@@ -67,9 +67,6 @@
       printingFor: (t) => `Printing for ${t}`,
       pause: "Pause", resume: "Resume", stop: "Stop", light: "Light",
       stopAsk: "Stop the print?", stopHint: "A stopped print cannot be resumed.", cancel: "Cancel", stopPrint: "Stop the print",
-      restart: "Restart", restartAsk: "Restart the printer?", restartPrinter: "Restart printer",
-      restartHint: "It switches off and on again: the screen, the camera and the CFS restart, and it is back in a minute or two.",
-      restarting: "Restarting the printer: it is back in a minute or two.",
       countLines: "Count G-code lines",
       lineAt: (a, b) => `Line ${a} of ${b}`, pauseAt: "Pause at line", setLine: "Set", cancelLine: "Cancel",
       pausesAt: (n, when) => `Pauses at line ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `in about ${t}`, soon: "any moment now",
@@ -82,7 +79,7 @@
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
       failed: (what, why) => `Could not ${what}: ${why}`,
-      verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", restart: "restart the printer", line: "set the pause" },
+      verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause" },
       notSetUp: "No printer is set up in Printer Panel yet. Add it under Settings, Devices & services.",
       cantLoad: "The printer's details could not be read; trying again.",
     },
@@ -98,9 +95,6 @@
       printingFor: (t) => `Har skrevet ut i ${t}`,
       pause: "Pause", resume: "Fortsett", stop: "Stopp", light: "Lys",
       stopAsk: "Stoppe utskriften?", stopHint: "En stoppet utskrift kan ikke fortsettes.", cancel: "Avbryt", stopPrint: "Stopp utskriften",
-      restart: "Omstart", restartAsk: "Starte skriveren på nytt?", restartPrinter: "Start skriveren på nytt",
-      restartHint: "Den slås av og på igjen: skjermen, kameraet og CFS starter på nytt, og den er tilbake om et minutt eller to.",
-      restarting: "Starter skriveren på nytt: den er tilbake om et minutt eller to.",
       countLines: "Tell G-kode-linjer",
       lineAt: (a, b) => `Linje ${a} av ${b}`, pauseAt: "Pause ved linje", setLine: "Sett", cancelLine: "Avbryt",
       pausesAt: (n, when) => `Pauser ved linje ${n}${when ? `, ${when}` : ""}`, inAbout: (t) => `om omtrent ${t}`, soon: "når som helst nå",
@@ -113,7 +107,7 @@
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Delkjøling", fanSide: "Sidevifte", fanCase: "Kabinettvifte", fanOn: (w) => `${w} av eller på`, fanLevel: (w) => `Fart for ${w.toLowerCase()}`,
       failed: (what, why) => `Kunne ikke ${what}: ${why}`,
-      verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", restart: "starte skriveren på nytt", line: "sette pausen" },
+      verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen" },
       notSetUp: "Ingen skriver er satt opp i Printer Panel ennå. Legg den til under Innstillinger, Enheter og tjenester.",
       cantLoad: "Kunne ikke lese skriverens detaljer; prøver igjen.",
     },
@@ -202,7 +196,6 @@
     .btn:disabled { opacity: 0.45; cursor: default; }
     .btn:focus-visible, .step:focus-visible, input:focus-visible, .mode:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
     .msg { min-height: 0; margin-top: 8px; font-size: 13px; color: var(--error-color, #db4437); }
-    .msg.info { color: var(--secondary-text-color); }
     .msg:empty { display: none; }
     .btn.small { min-height: 36px; padding: 0 12px; }
     .line { display: grid; gap: 6px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--divider-color); }
@@ -366,7 +359,6 @@
                   ${has("resume") ? `<button class="btn primary" data-act="resume"><ha-icon icon="mdi:play"></ha-icon>${esc(s.resume)}</button>` : ""}
                   ${has("stop") ? `<button class="btn danger" data-act="stop"><ha-icon icon="mdi:stop"></ha-icon>${esc(s.stop)}</button>` : ""}
                   ${has("light") ? `<button class="btn" data-act="light" aria-pressed="false"><ha-icon icon="mdi:lightbulb-outline"></ha-icon>${esc(s.light)}</button>` : ""}
-                  ${has("restart") ? `<button class="btn" data-act="restart" hidden><ha-icon icon="mdi:restart"></ha-icon>${esc(s.restart)}</button>` : ""}
                 </div>
                 ${has("pause_at_line") && has("count_lines") ? `<div class="line" hidden>
                   <div class="countrow"><span>${esc(s.countLines)}</span>
@@ -607,10 +599,6 @@
         const icon = lightBtn.querySelector("ha-icon");
         if (icon) icon.setAttribute("icon", light && light.state === "on" ? "mdi:lightbulb-on" : "mdi:lightbulb-outline");
       }
-      // Restart: not while a print is under way (Mark: hidden while printing); kept usable while the printer is out of
-      // reach, as a restart is how it comes back
-      const restartBtn = root.querySelector('[data-act="restart"]');
-      if (restartBtn) restartBtn.hidden = active;
       this._text(root.querySelector(".offline"), online ? "" : s.offline);
 
       // the pause at a line, and where the printer is in the file: asked every 10 seconds, only while counting is on, a
@@ -748,17 +736,16 @@
     _act(act) {
       const e = this._cfg.entities;
       if (act === "light") { this._call("light", "toggle", { entity_id: e.light }, "set"); return; }
-      if (act === "stop" || act === "restart") { this._ask(act); return; }
+      if (act === "stop") { this._ask(); return; }
       this._press(act);
     }
 
-    /* Stop and Restart ask first, in one dialog */
-    _ask(kind) {
+    /* Stop asks first */
+    _ask() {
       const s = this._s, dlg = this.shadowRoot.querySelector("dialog.confirm");
       if (!dlg || !dlg.showModal) return;
-      const [title, hint, go, icon] = kind === "restart"
-        ? [s.restartAsk, s.restartHint, s.restartPrinter, "mdi:restart"] : [s.stopAsk, s.stopHint, s.stopPrint, "mdi:stop"];
-      this._asking = kind;
+      const [title, hint, go, icon] = [s.stopAsk, s.stopHint, s.stopPrint, "mdi:stop"];
+      this._asking = "stop";
       dlg.querySelector("h3").textContent = title;
       dlg.querySelector("p").textContent = hint;
       const button = dlg.querySelector('[data-dlg="go"]');
@@ -772,11 +759,6 @@
       if (dlg) dlg.close();
       if (choice !== "go") return;
       if (this._asking === "stop") this._press("stop");
-      else if (this._asking === "restart") this._restart();
-    }
-
-    async _restart() {
-      if (await this._call("button", "press", { entity_id: this._cfg.entities.restart }, "restart")) this._info(this._s.restarting);
     }
 
     /* the pause at a line: the box, the line it is set to, and where the printer is */
@@ -852,16 +834,6 @@
       try { return new Intl.NumberFormat(lang).format(n); } catch (err) { return String(n); }
     }
 
-    /* a note under the buttons that is not a failure */
-    _info(text) {
-      const msg = this.shadowRoot.querySelector(".msg");
-      if (!msg) return;
-      msg.classList.add("info");
-      msg.textContent = text;
-      clearTimeout(this._msgTimer);
-      this._msgTimer = setTimeout(() => { msg.textContent = ""; msg.classList.remove("info"); }, 20000);
-    }
-
     _press(act) {
       const entity = this._cfg.entities[act];
       if (!entity) return;
@@ -898,7 +870,6 @@
       } catch (err) {
         const msg = this.shadowRoot.querySelector(".msg");
         if (msg) {
-          msg.classList.remove("info");
           msg.textContent = this._s.failed(this._s.verbs[verb] || this._s.verbs.set, (err && err.message) || String(err));
           clearTimeout(this._msgTimer);
           this._msgTimer = setTimeout(() => { msg.textContent = ""; }, 8000);

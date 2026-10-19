@@ -52,7 +52,7 @@ async def test_the_sidebar_item_and_what_the_page_is_told(hass: HomeAssistant, k
     assert answer["success"], answer
     told = answer["result"]
     assert told["name"] == "K2Plus-235D" and told["path"] == "printer" and told["entities"]["status"] == k2plus["print_status"]
-    assert told["entities"]["restart"].startswith("button.") and told["entities"]["pause_at_line"].startswith("number.")
+    assert told["entities"]["pause_at_line"].startswith("number.") and told["entities"]["count_lines"].startswith("switch.")
     assert [s["label"] for s in told["boxes"][0]["slots"]] == ["1A", "1B", "1C", "1D"] and told["external"]["label"] == "Ext"
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert "printer" not in hass.data[DATA_PANELS]

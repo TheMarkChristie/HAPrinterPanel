@@ -44,11 +44,6 @@
     }
   },
   "entity": {
-    "button": {
-      "restart_printer": {
-        "name": "Restart printer"
-      }
-    },
     "number": {
       "pause_at_line": {
         "name": "Pause at G-code line"

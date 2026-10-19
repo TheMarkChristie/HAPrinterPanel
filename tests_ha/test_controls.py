@@ -1,5 +1,5 @@
 """Printer Panel's own controls on the printer, in a real Home Assistant, with the printer's Moonraker stood in for
-(aioclient_mock): Restart printer, Pause at G-code line, and what the page is told about where the printer is."""
+(aioclient_mock): Count G-code lines, Pause at G-code line, and what the page is told about where the printer is."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -66,42 +66,19 @@ async def _set_line(hass: HomeAssistant, number: str, line: int) -> None:
     await hass.async_block_till_done()
 
 
-async def test_restart_is_a_button_on_the_printer_that_reboots_it(hass: HomeAssistant, k2plus, aioclient_mock) -> None:
-    entry = await _add(hass, k2plus)
-    restart = _own(hass, k2plus, "button", "restart_printer")
-    assert er.async_get(hass).async_get(restart).device_id == k2plus["device_id"]
-    assert dr.async_get(hass).async_get(k2plus["device_id"]).config_entry_id == k2plus["creality_entry"] != entry.entry_id, \
-        "on the printer's device, which stays the Creality integration's"
-    assert hass.states.get(restart).attributes["device_class"] == "restart"
-    aioclient_mock.post(f"{BASE}/machine/reboot", json={"result": "ok"})
-    await hass.services.async_call("button", "press", {"entity_id": restart}, blocking=True)
-    assert [(method.upper(), str(url)) for method, url, *_ in aioclient_mock.mock_calls] == [("POST", f"{BASE}/machine/reboot")]
-
-
-@pytest.mark.parametrize(("reply", "key", "detail"), [
-    ({"status": 500, "json": {"error": {"code": 500, "message": "sudo: not found"}}}, "moonraker_refused", "HTTP 500: sudo: not found"),
-    ({"exc": aiohttp.ClientConnectionError("No route to host")}, "moonraker_unreachable", "No route to host"),
-    ({"exc": aiohttp.ServerDisconnectedError()}, None, None),  # it went down as it answered: a restart under way
-])
-async def test_a_restart_the_printer_refuses_is_said(hass: HomeAssistant, k2plus, aioclient_mock, reply, key, detail) -> None:
-    await _add(hass, k2plus)
-    restart = _own(hass, k2plus, "button", "restart_printer")
-    aioclient_mock.post(f"{BASE}/machine/reboot", **reply)
-    if key is None:
-        await hass.services.async_call("button", "press", {"entity_id": restart}, blocking=True)
-        return
-    with pytest.raises(HomeAssistantError) as err:
-        await hass.services.async_call("button", "press", {"entity_id": restart}, blocking=True)
-    assert err.value.translation_key == key and err.value.translation_placeholders == {"detail": detail}
-
-
-async def test_without_the_printers_address_a_restart_says_so(hass: HomeAssistant, k2plus, aioclient_mock) -> None:
-    await _add(hass, k2plus)
-    creality = hass.config_entries.async_get_entry(k2plus["creality_entry"])
-    hass.config_entries.async_update_entry(creality, data={})
-    with pytest.raises(HomeAssistantError) as err:
-        await hass.services.async_call("button", "press", {"entity_id": _own(hass, k2plus, "button", "restart_printer")}, blocking=True)
-    assert err.value.translation_key == "moonraker_no_host" and not aioclient_mock.mock_calls
+async def test_the_restart_button_of_earlier_versions_is_removed(hass: HomeAssistant, k2plus) -> None:
+    """0.2.0 and 0.2.1 had a Restart printer button (the K2's firmware cannot reboot through Moonraker); its entity goes."""
+    entry = MockConfigEntry(domain=DOMAIN, title="K2Plus-235D", unique_id=k2plus["device_id"], data={"device_id": k2plus["device_id"]},
+                            options={"title": "Printer", "notify": [], "events": ["finished"]})
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create("button", DOMAIN, f"{k2plus['device_id']}_restart_printer", config_entry=entry,
+                                       suggested_object_id="k2plus_235d_restart_printer")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get(old.entity_id) is None
+    assert not [e for e in er.async_entries_for_config_entry(registry, entry.entry_id) if e.domain == "button"]
+    assert "restart" not in hass.config_entries.async_entries(DOMAIN)[0].runtime_data.describe()["entities"]
 
 
 async def test_a_pause_at_a_line_pauses_just_after_it_and_says_so(hass: HomeAssistant, k2plus, phone, aioclient_mock) -> None:

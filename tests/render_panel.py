@@ -1,5 +1,5 @@
 """Check and screenshot the Printer page in headless Chrome, from the K2 Plus fixture (tests/fixtures/k2plus.json): what
-it shows mid-print, what each control asks Home Assistant to do, the pause at a line, Restart, pictures that do not load,
+it shows mid-print, what each control asks Home Assistant to do, the pause at a line, pictures that do not load,
 Norwegian, and the printer off. The page inlines the script and the states (a file:// page cannot fetch), stands in for
 the bit of hass the page reads, and records every service call; Home Assistant's own elements (ha-card, ha-icon,
 ha-menu-button) are stood in for by plain ones, and without its card helpers the camera is the snapshot fallback. The
@@ -21,13 +21,11 @@ ROOT = os.path.dirname(HERE)
 SCRIPT = os.path.join(ROOT, "custom_components", "printer_panel", "www", "printer-panel.js")
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 FIXTURE = json.load(open(os.path.join(HERE, "fixtures", "k2plus.json"), encoding="utf-8"))
-RESTART, PAUSE_AT, COUNT = ("button.k2plus_235d_restart_printer", "number.k2plus_235d_pause_at_g_code_line",
-                            "switch.k2plus_235d_count_g_code_lines")
+PAUSE_AT, COUNT = "number.k2plus_235d_pause_at_g_code_line", "switch.k2plus_235d_count_g_code_lines"
 CONFIG = {"entry_id": "e1", "title": "Printer", "path": "printer", "device_id": "k2plus", "name": "K2Plus-235D", "model": "K2 Plus",
           **p.resolve(FIXTURE["registry"])}
-CONFIG["entities"].update(restart=RESTART, pause_at_line=PAUSE_AT, count_lines=COUNT)
+CONFIG["entities"].update(pause_at_line=PAUSE_AT, count_lines=COUNT)
 STATES = {s["entity_id"]: s for s in FIXTURE["states"]}
-STATES[RESTART] = {"entity_id": RESTART, "state": "unknown", "attributes": {"device_class": "restart"}}
 STATES[PAUSE_AT] = {"entity_id": PAUSE_AT, "state": "0", "attributes": {"min": 0, "max": 99999999, "step": 1, "mode": "box"}}
 STATES[COUNT] = {"entity_id": COUNT, "state": "off", "attributes": {}}
 
@@ -74,7 +72,7 @@ const pictures = async () => {
   out(`pictures that do not load: print picture shown ${vis(".preview")}, name full width ${q(".head").classList.contains("nopic")} | camera: ${vis(".camwrap img")}, "${txt(".camwrap .nocam")}"`);
   out(`header: ${txt(".bar .title")} | status ${txt(".bar .status")}`);
   out(`print: ${txt(".name")} | ${txt(".sub")} | ${txt(".pct")} | ${txt(".times").replace(/\s+/g, " ")}`);
-  out(`buttons: pause ${vis('[data-act="pause"]')}, resume ${vis('[data-act="resume"]')}, stop ${vis('[data-act="stop"]')}, restart ${vis('[data-act="restart"]')}, light pressed ${q('[data-act="light"]').getAttribute("aria-pressed")}`);
+  out(`buttons: pause ${vis('[data-act="pause"]')}, resume ${vis('[data-act="resume"]')}, stop ${vis('[data-act="stop"]')}, light pressed ${q('[data-act="light"]').getAttribute("aria-pressed")}`);
   out(`counting off: line box ${vis(".line")} | toggle "${txt("[data-count]")}" | counter and box ${vis(".lineon")} | position asked ${window.POS_ASKED || 0}`);
   out(`temperatures: ${[...r.querySelectorAll("[data-temp]")].map((row) => `${row.querySelector(".what").textContent} ${row.querySelector(".now").textContent} target ${row.querySelector("input") ? row.querySelector("input").value : "-"}`).join(" | ")}`);
   out(`speed: ${txt("[data-speed] .now")} | modes pressed: ${[...r.querySelectorAll(".mode")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent).join(",")}`);
@@ -147,18 +145,14 @@ const pictures = async () => {
   states[COUNT_ID] = { ...states[COUNT_ID], state: "on" };
   panel.hass = mk("nb"); await panel._refreshPos(); await wait(30);
   out(`nb: ${txt(".bar .status")} | ${txt(".times").replace(/\s+/g, " ")} | ${txt('[data-act="pause"]')} | "${txt(".linepos")}" | "${txt(".linestate")}"`);
-  // idle: Restart shows, asks, restarts
+  // idle
   const status = Object.keys(states).find((k) => k.endsWith("_print_status"));
   states = JSON.parse(JSON.stringify(STATES)); states[status] = { ...states[status], state: "idle" }; panel.hass = mk("en"); await wait(30);
-  out(`idle: restart ${vis('[data-act="restart"]')} | pause ${vis('[data-act="pause"]')} | line box ${vis(".line")}`);
-  q('[data-act="restart"]').click(); await wait(20);
-  out(`restart asks first: "${txt("dialog h3")}" "${txt("dialog p")}" / "${txt('[data-dlg="go"]')}", calls ${calls.length}`);
-  q('[data-dlg="go"]').click(); await wait(30);
-  out(`restart -> ${calls.pop()} | "${txt(".msg")}" (info ${q(".msg").classList.contains("info")})`);
+  out(`idle: pause ${vis('[data-act="pause"]')} | stop ${vis('[data-act="stop"]')} | line box ${vis(".line")}`);
   // the printer off
   states = JSON.parse(JSON.stringify(states)); states[status] = { ...states[status], state: "unavailable", attributes: {} };
   panel.hass = mk("en"); await wait(30);
-  out(`off: ${txt(".bar .status")} | "${txt(".offline")}" | pause shown ${vis('[data-act="pause"]')} | restart shown ${vis('[data-act="restart"]')} | nozzle input disabled ${r.querySelector('[data-temp="nozzle"] input').disabled}`);
+  out(`off: ${txt(".bar .status")} | "${txt(".offline")}" | pause shown ${vis('[data-act="pause"]')} | nozzle input disabled ${r.querySelector('[data-temp="nozzle"] input').disabled}`);
   // back to printing, the pictures loading
   await pictures();
   out(`pictures that load: print picture shown ${vis(".preview")}, name full width ${q(".head").classList.contains("nopic")} | camera: ${vis(".camwrap img")}, note shown ${vis(".camwrap .nocam")}`);

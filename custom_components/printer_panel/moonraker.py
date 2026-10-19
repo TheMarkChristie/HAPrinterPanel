@@ -1,5 +1,5 @@
 """Moonraker on the printer (the K2 runs it beside Creality's own service, on port 7125, as Fluidd and Mainsail use it):
-where the printer is in the file it is printing, the file itself, and the reboot. Plain HTTP, no Home Assistant in it
+where the printer is in the file it is printing, and the file itself. Plain HTTP, no Home Assistant in it
 beyond the session it is given."""
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ CHUNK = 1 << 16
 
 
 class MoonrakerError(Exception):
-    """Moonraker could not be reached (unreachable), said no (refused), or dropped the connection (gone: a reboot does)."""
+    """Moonraker could not be reached (unreachable), said no (refused), or dropped the connection (gone)."""
 
     def __init__(self, key: str, detail: str = "") -> None:
         super().__init__(detail or key)
@@ -70,14 +70,6 @@ class Moonraker:
             raise MoonrakerError("unreachable", str(err) or type(err).__name__) from err
         return index.finish()
 
-    async def reboot(self) -> None:
-        """Restart the whole printer. Moonraker answers before it goes, or the connection drops as it goes: both are a
-        restart under way."""
-        try:
-            await self._json("POST", "/machine/reboot")
-        except MoonrakerError as err:
-            if err.key != "gone":
-                raise
 
     async def _json(self, method: str, path: str) -> dict[str, Any]:
         try:

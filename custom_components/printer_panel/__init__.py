@@ -2,7 +2,7 @@
 (ha_creality_ws): the live camera, the print's name, progress, time left and finish time, temperatures and their targets,
 the CFS's colours, speed and fans, the light, and Pause, Resume and Stop; and phone notifications when a print finishes,
 pauses, runs out of filament or stops with an error. The same view is a card (custom:printer-panel-card). Through the
-printer's Moonraker, two entities of its own on the printer: Restart printer, and Pause at G-code line."""
+printer's Moonraker, two entities of its own on the printer: Count G-code lines, and Pause at G-code line."""
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +16,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
@@ -25,7 +26,7 @@ from .linepause import STORE_VERSION
 from .link import PrinterLink
 
 WWW = Path(__file__).parent / "www"
-PLATFORMS = [Platform.BUTTON, Platform.NUMBER, Platform.SWITCH]
+PLATFORMS = [Platform.NUMBER, Platform.SWITCH]
 _STATIC = f"{DOMAIN}_static"
 _SCRIPT_URL = f"{DOMAIN}_script_url"
 
@@ -74,6 +75,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await panel_custom.async_register_panel(
         hass, frontend_url_path=link.path, webcomponent_name=PANEL_ELEMENT, module_url=await _script_url(hass),
         sidebar_title=link.title, sidebar_icon=SIDEBAR_ICON, config={"entry_id": entry.entry_id}, require_admin=False)
+    # 0.2.0 and 0.2.1 had a Restart printer button: the K2's firmware cannot reboot through Moonraker (no sudo), so it
+    # went in 0.2.2 (Mark: a controlled socket instead); its entity goes with it
+    registry = er.async_get(hass)
+    if old := registry.async_get_entity_id("button", DOMAIN, f"{link.device_id}_restart_printer"):
+        registry.async_remove(old)
     await link.line_pause.async_load()  # before the entities, so Pause at G-code line starts with the line kept
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(link.async_start())
