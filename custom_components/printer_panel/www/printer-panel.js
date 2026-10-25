@@ -75,6 +75,7 @@
       temps: "Temperatures", nozzle: "Nozzle", bed: "Bed", chamber: "Chamber", target: "Target", off2: "off", onW: "On", offW: "Off",
       lower: (w) => `Lower the ${w} target`, raise: (w) => `Raise the ${w} target`, setTarget: (w) => `${w} target`,
       cfs: "CFS", box: (n) => `Box ${n}`, external: "External spool", empty: "Empty", low: "Low", inUse: "In use",
+      notSet: "Spool in, not set on the printer",
       uses: "Colours in the print file", remaining: (p) => `${p} % left`,
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -125,6 +126,7 @@
       temps: "Temperaturer", nozzle: "Dyse", bed: "Plate", chamber: "Kammer", target: "Mål", off2: "av", onW: "På", offW: "Av",
       lower: (w) => `Senk målet for ${w.toLowerCase()}`, raise: (w) => `Øk målet for ${w.toLowerCase()}`, setTarget: (w) => `Mål for ${w.toLowerCase()}`,
       cfs: "CFS", box: (n) => `Boks ${n}`, external: "Ekstern spole", empty: "Tom", low: "Lite igjen", inUse: "I bruk",
+      notSet: "Spole i, ikke angitt på skriveren",
       uses: "Farger i utskriftsfilen", remaining: (p) => `${p} % igjen`,
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -864,7 +866,7 @@
         row.classList.toggle("low", low);
         const mat = row.querySelector(".mat");
         const matHtml = empty ? esc(s.empty)
-          : `${esc(filament || attrs.name || "")}${inUse ? `<span class="tag">${esc(s.inUse)}</span>` : ""}<small>${esc([attrs.type, hex].filter(Boolean).join(" · "))}</small>`;
+          : `${esc(filament || attrs.name || s.notSet)}${inUse ? `<span class="tag">${esc(s.inUse)}</span>` : ""}<small>${esc([attrs.type, hex].filter(Boolean).join(" · "))}</small>`;
         if (mat.innerHTML !== matHtml) mat.innerHTML = matHtml;
         const leftHtml = empty || left == null ? ""
           : `${esc(low ? `${s.low} · ${Math.round(left)} %` : `${Math.round(left)} %`)}<span class="mini"><i style="width:${Math.max(0, Math.min(100, left))}%"></i></span>`;
@@ -968,7 +970,9 @@
       const attrs = (c && c.attributes) || (f && f.attributes) || {};
       const hex = colour(attrs.color_hex) || colour(c && c.state);
       const filament = f && !["unknown", "unavailable", "", "-", "None"].includes(f.state) ? f.state : null;
-      return { attrs, hex, filament, empty: !hex && !filament };
+      // the CFS's state 1 or more: a spool is in, though nothing may be set for it (no chip, not set on the printer)
+      const held = Number(attrs.state) >= 1 && !(f && f.state === "unavailable");
+      return { attrs, hex, filament, empty: !hex && !filament && !held };
     }
 
     _slotInfo(label) {
@@ -1102,9 +1106,9 @@
       const reg = this._reg;
       const elsewhere = new Set(Object.entries(reg.slots || {}).filter(([k]) => k !== label).map(([, v]) => v.stock));
       const rgb = (h) => { const c = colour(h); return c ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : null; };
-      const want = rgb(info.hex), type = String(info.attrs.type || "").toUpperCase();
+      const want = rgb(info.hex), type = String(info.attrs.type || "").toUpperCase(), product = String(info.attrs.name || "").toUpperCase();
       const far = (x) => { const c = rgb(x.hex); return want && c ? Math.hypot(c[0] - want[0], c[1] - want[1], c[2] - want[2]) : 0; };
-      const fits = (x) => (type && String(x.type).toUpperCase().includes(type) ? 0 : 1);
+      const fits = (x) => ([type, product].some((t) => t && String(x.type).toUpperCase().includes(t)) ? 0 : 1);
       return reg.spools.filter((x) => x.left > 0 && !elsewhere.has(x.stock))
         .map((x) => ({ x, fit: fits(x), far: far(x) })).sort((a, b) => a.fit - b.fit || a.far - b.far).map((e) => e.x);
     }
@@ -1125,8 +1129,10 @@
       const label = this._slotOpen, info = this._slotInfo(label), a = info.attrs;
       this.shadowRoot.querySelector("dialog.slotform").close();
       const creality = /creality/i.test(a.vendor || "");
+      // Creality's product with its type: "Hyper PLA", "Hyper Stardust PLA"
+      const product = creality && a.name ? (String(a.name).toUpperCase().includes(String(a.type || "").toUpperCase()) ? a.name : `${a.name} ${a.type || ""}`.trim()) : a.type;
       this._forSlot = label;
-      this._openSpool(null, { brand: creality ? "Creality" : "", type: creality && a.name ? a.name : a.type, hex: info.hex });
+      this._openSpool(null, { brand: creality ? "Creality" : "", type: product || "", hex: info.hex });
     }
 
     /* checking a spool in (prefill: what the CFS says), or changing one */

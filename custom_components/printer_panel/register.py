@@ -60,14 +60,20 @@ class FilamentRegister:
 
     @staticmethod
     def slot_info(state: State | None) -> dict[str, Any] | None:
-        """What the CFS says is in a slot, or None when it cannot say (the printer off, the integration starting)."""
-        if state is None or state.state in NOT_THERE:
+        """What the CFS says is in a slot, or None when it cannot say (the printer off, the integration starting). A slot
+        whose filament is unknown but whose state says a spool is in (1) holds a spool with nothing set for it: one
+        without a chip that was not set on the printer, as Norway's 1B on 25 Oct 2026."""
+        if state is None or state.state == "unavailable":
             return None
         a = state.attributes
-        name = a.get("name") or (state.state if state.state not in ("", "-", "None") and not state.state.startswith("#") else "")
-        hex_ = colour_hex(a.get("color_hex")) or colour_hex(state.state)
-        return {"loaded": bool(name or hex_), "vendor": a.get("vendor") or "", "type": a.get("type") or "", "name": name,
-                "hex": hex_ or "", "rfid": a.get("rfid") or "", "state": a.get("state")}
+        held = a.get("state") if isinstance(a.get("state"), (int, float)) and not isinstance(a.get("state"), bool) else None
+        if state.state == "unknown" and held is None:
+            return None
+        raw = "" if state.state in NOT_THERE else state.state
+        name = a.get("name") or (raw if raw not in ("", "-", "None") and not raw.startswith("#") else "")
+        hex_ = colour_hex(a.get("color_hex")) or colour_hex(raw)
+        return {"loaded": bool(name or hex_ or (held or 0) >= 1), "vendor": a.get("vendor") or "", "type": a.get("type") or "",
+                "name": name, "hex": hex_ or "", "rfid": a.get("rfid") or "", "state": a.get("state")}
 
     @callback
     def start(self) -> CALLBACK_TYPE:

@@ -184,12 +184,15 @@ class Register:
         return True
 
     def match(self, label: str, info: dict[str, Any]) -> str | None:
-        """The one Creality spool in the register of the CFS's type and colour, not in another slot and not empty."""
+        """The one Creality spool in the register of the CFS's type (or the product it names, Hyper Stardust say) and
+        colour, not in another slot and not empty."""
         if "creality" not in str(info.get("vendor") or "").lower():
             return None
         elsewhere = {s.get("stock") for k, s in self.slots.items() if k != label}
+        product = str(info.get("name") or "").strip().lower()
         found = [s for s in self.spools
-                 if "creality" in s["brand"].lower() and base_type(s["type"]) == base_type(info.get("type"))
+                 if "creality" in s["brand"].lower()
+                 and (base_type(s["type"]) == base_type(info.get("type")) or (product and product in s["type"].lower()))
                  and _near(s["hex"], colour_hex(info.get("hex"))) and s["left"] > 0 and s["stock"] not in elsewhere]
         return found[0]["stock"] if len(found) == 1 else None
 

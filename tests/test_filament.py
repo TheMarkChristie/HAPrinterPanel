@@ -72,6 +72,15 @@ def test_a_creality_spool_is_matched_by_the_cfs_and_a_generic_one_is_not():
     assert not r.slot_seen("1D", PURPLE), "the same spool seen again changes nothing"
 
 
+def test_a_creality_spool_checked_in_by_its_product_name_is_matched_too():
+    # Norway's 1C on 25 Oct 2026: the CFS says type PLA, name Hyper Stardust
+    stardust = {"loaded": True, "vendor": "Creality", "type": "PLA", "name": "Hyper Stardust", "hex": "#2f6f7a", "rfid": "01004", "state": 2}
+    for typed in ("Hyper Stardust", "Hyper Stardust PLA"):
+        r = f.Register()
+        r.check_in("Creality", "Teal", "#2f6f7a", typed, 1000, DAY)
+        assert r.slot_seen("1C", stardust) and r.slots["1C"].get("stock") == "F001", typed
+
+
 def test_two_creality_spools_alike_wait_for_the_number():
     r = f.Register()
     r.check_in("Creality", "Purple", "#9e007e", "Hyper PLA", 1000, DAY)

@@ -246,6 +246,17 @@ const pictures = async () => {
   window.WS_REFUSE = null; spoolDlg.close(); calls.length = 0;
   window.FIL_CB({ ...JSON.parse(JSON.stringify(window.FIL)), slots: { "1A": { stock: "F002", how: "confirmed" }, "1D": { stock: "F001", how: "auto" } }, pending: {}, printing: {} }); await wait(20);
   out(`1A confirmed: waiting ${r.querySelectorAll(".waiting").length} | ${stockButtons()} | F002 "${txt('.spool[data-stock="F002"] small')}"`);
+  const slotB = Object.keys(STATES).filter((k) => /_slot_2_(filament|color)$/.test(k));
+  states = JSON.parse(JSON.stringify(states));
+  for (const k of slotB) states[k] = { ...states[k], state: k.endsWith("_color") ? "" : "unknown",
+    attributes: { ...states[k].attributes, vendor: "", type: "", name: "", color_hex: "", rfid: "", state: 1 } };
+  panel.hass = mk("en"); await wait(20);
+  const rowB = r.querySelector('.slot[data-slot="1B"]');
+  out(`1B in, nothing set: "${rowB.querySelector(".mat").textContent.trim()}" | stock button ${rowB.querySelector(".stock").hidden ? "hidden" : `"${rowB.querySelector(".stock").textContent}"`}`);
+  for (const k of slotB) states[k].attributes.state = 0;
+  panel.hass = mk("en"); await wait(20);
+  out(`1B empty (state 0): "${rowB.querySelector(".mat").textContent.trim()}" | stock button ${rowB.querySelector(".stock").hidden ? "hidden" : "shown"}`);
+  states = JSON.parse(JSON.stringify(STATES)); panel.hass = mk("en"); await wait(20);
   const big = many(40);
   window.FIL_CB(big); await wait(20);
   out(`40 spools: find box ${vis(".find")} | ${[...r.querySelectorAll(".filament .boxhead")].map((e) => e.textContent.trim()).join(" / ")} | first ${[...r.querySelectorAll(".spool")].slice(0, 3).map((e) => e.dataset.stock).join(",")} | rows ${r.querySelectorAll(".spool").length} | card ${Math.round(q(".filament").getBoundingClientRect().height)} px`);
