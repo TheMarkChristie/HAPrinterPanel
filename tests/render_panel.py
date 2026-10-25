@@ -47,11 +47,13 @@ window.POS = { available: true, target: null, state: "printing", line: 341202, l
 const day = "2026-10-25";
 window.FIL = {
   spools: [
-    { stock: "F001", brand: "Creality", colour: "Purple", hex: "#9e007e", type: "Hyper PLA", weight: 1000, left: 812.4, checked_in: day, slot: "1D" },
-    { stock: "F002", brand: "Sunlu", colour: "Black", hex: "#000000", type: "PLA", weight: 1000, left: 1000, checked_in: day, slot: null },
+    { stock: "F001", brand: "Creality", colour: "Purple", hex: "#9e007e", type: "Hyper PLA", weight: 1000, left: 812.4, checked_in: day, slot: "1D", price: 249.5 },
+    { stock: "F002", brand: "Sunlu", colour: "Black", hex: "#000000", type: "PLA", weight: 1000, left: 1000, checked_in: day, slot: null, tag: "#00000e" },
     { stock: "F003", brand: "eSun", colour: "Pink", hex: "#ff37af", type: "PLA+", weight: 1000, left: 64, checked_in: day, slot: null },
   ],
   slots: { "1D": { stock: "F001", how: "auto" } }, pending: { "1A": 15.2 }, printing: { "1B": 4.1, "1D": 2 },
+  last_print: { file: "/mnt/UDISK/printer_data/gcodes/tag Robert_PLA_5h51m22s.gcode", ended: "2026-10-25T23:00", grams: 42.3, cost: 9.8, uncosted: 0 },
+  tares: { creality: 165 }, currency: "NOK",
 };
 // a register of n spools: these three, then a shelf of brands, colours and types, F014 confirmed in 1B
 const many = (n) => {
@@ -74,6 +76,7 @@ const filament = (m) => {
   if (m.type.endsWith("/check_in")) return { stock: "F004", brand: m.brand, colour: m.colour, hex: m.hex, type: m.material, weight: m.weight, left: m.weight, slot: null };
   if (m.type.endsWith("/confirm")) return { booked: 15.2 };
   if (m.type.endsWith("/update")) return { ...window.FIL.spools.find((x) => x.stock === m.stock), ...m };
+  if (m.type.endsWith("/tag")) return { stock: m.stock, tag: "#00000e", material: "Generic PLA", weight: 1000 };
   return null;
 };
 const connection = { subscribeMessage: async (cb, m) => {
@@ -246,6 +249,30 @@ const pictures = async () => {
   window.SIGN_REFUSE = "Unauthorized"; q('[data-fil="pdf"]').click(); await wait(30);
   out(`PDF refused: "${txt(".fmsg")}" | button enabled ${!q('[data-fil="pdf"]').disabled}`);
   window.SIGN_REFUSE = null; HTMLAnchorElement.prototype.click = realClick; calls.length = 0;
+  // prices, weighing and NFC tags
+  out(`last print: "${txt(".lastprint")}" | F002 "${txt('.spool[data-stock="F002"] small')}"`);
+  q('[data-fil="checkin"]').click(); await wait(20);
+  out(`check in: "${txt("dialog.spoolform .plabel")}" shown ${vis('dialog.spoolform [name="price"]')} | weigh shown ${vis("dialog.spoolform [data-weigh]")} | NFC shown ${vis('dialog.spoolform [data-fil="tag"]')}`);
+  sf("brand", "Sunlu"); sf("material", "PLA"); sf("price", "199"); spoolDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`with a price -> ${calls.pop()}`);
+  spoolDlg.close(); calls.length = 0;
+  r.querySelector('.spool[data-stock="F001"] [data-fil="edit"]').click(); await wait(20);
+  out(`change F001: price ${fields(["price"])} | empty spool ${fields(["tare"])} (Creality's, kept) | weigh shown ${vis("dialog.spoolform [data-weigh]")} | NFC shown ${vis('dialog.spoolform [data-fil="tag"]')}`);
+  sf("weighed", "100"); spoolDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`weighed 100, under the empty spool: "${txt("dialog.spoolform .dmsg")}" | asked ${calls.length}`);
+  sf("weighed", "800"); sf("price", ""); spoolDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`weighed 800, price cleared -> ${calls.pop()}`);
+  r.querySelector('.spool[data-stock="F002"] [data-fil="edit"]').click(); await wait(20);
+  sf("weighed", "700"); spoolDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`Sunlu weighed, no empty spool known yet: "${txt("dialog.spoolform .dmsg")}" | asked ${calls.length}`);
+  spoolDlg.querySelector('[data-fil="tag"]').click(); await wait(40);
+  const tagDlg = q("dialog.tagform");
+  out(`NFC: open ${tagDlg.open} "${txt("dialog.tagform h3")}" | ${txt(".tmat")} | ${txt(".tcol")} ${tagDlg.querySelector(".dot").style.background} | ${txt(".twt")} | "${txt(".tagafter")}" | -> ${calls.pop()}`);
+  tagDlg.querySelector('[data-fil="copy"]').click(); await wait(20);
+  tagDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`NFC done: tag dialog open ${tagDlg.open} | spool dialog still open ${spoolDlg.open}`);
+  spoolDlg.close(); calls.length = 0;
+  out(`money: ${["NOK", "GBP", "EUR"].map((c) => window.__printerPanel.money(1234.5, c, "en")).join(", ")} | nb ${window.__printerPanel.money(9.8, "NOK", "nb")}`);
   out(`colour names:${["#9e007e", "#2f6f7a", "#00a3ff", "#c12e1f", "#f4f4f4", "#ff37af"].map((h) => `${h} ${window.__printerPanel.colourName(h, "en")}`).join(", ")} | nb #2f6f7a ${window.__printerPanel.colourName("#2f6f7a", "nb")}`);
   r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
   out(`change F003: "${txt("dialog.spoolform h3")}" | ${fields(["brand", "colour", "hex", "material", "weight", "left"])} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);

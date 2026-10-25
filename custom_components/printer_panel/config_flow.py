@@ -63,6 +63,7 @@ class PrinterPanelConfigFlow(ConfigFlow, domain=DOMAIN):
     """A printer for the sidebar."""
 
     VERSION = 1
+    MINOR_VERSION = 2       # 1.2: filament_low among the events
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         found = printers(self.hass)

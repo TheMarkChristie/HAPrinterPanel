@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 DOMAIN = "printer_panel"
@@ -234,3 +235,95 @@ async def test_editing_removing_and_deleting_the_printer(hass: HomeAssistant, k2
     assert await hass.config_entries.async_remove(entry.entry_id)
     await hass.async_block_till_done()
     assert f"{DOMAIN}.{entry.entry_id}.filament" not in hass_storage
+
+
+async def _add_telling(hass: HomeAssistant, k2plus: dict[str, str], events: list[str] | None, minor_version: int = 2) -> MockConfigEntry:
+    options = {"title": "Printer", "notify": ["mobile_app_test"]}
+    if events is not None:
+        options["events"] = events
+    hass.states.async_set(STATUS, "idle", {"file": "", "progress": 0})
+    entry = MockConfigEntry(domain=DOMAIN, title="K2Plus-235D", unique_id=k2plus["device_id"], data={"device_id": k2plus["device_id"]},
+                            options=options, version=1, minor_version=minor_version)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_a_spool_taken_low_tells_the_phones_and_finished_says_what_the_print_cost(
+        hass: HomeAssistant, k2plus, hass_ws_client, phone) -> None:
+    hass.config.currency = "NOK"
+    await _add_telling(hass, k2plus, ["finished", "filament_low"])
+    client = await hass_ws_client(hass)
+    answer = await _ask(client, 1, {"type": "printer_panel/filament/check_in", "brand": "Sunlu", "colour": "Black", "hex": "#000000",
+                                    "material": "PLA", "weight": 1000, "price": 199})
+    assert answer["success"] and answer["result"]["price"] == 199.0
+    assert (await _ask(client, 2, {"type": "printer_panel/filament/update", "stock": "F001", "left": 110}))["success"]
+    assert (await _ask(client, 3, {"type": "printer_panel/filament/confirm", "slot": "1B", "stock": "F001"}))["success"]
+    await _print(hass, [(0, "box_1_slot_2"), (3356, "box_1_slot_2")])
+    await hass.async_block_till_done()
+    texts = sorted(p["message"] for p in phone)
+    assert texts[0] == "Coaster is finished, after " + texts[0].split("after ")[1].split(".")[0] + ". Filament: 10 g, 1.99 kr."
+    assert texts[1] == "F001 Sunlu Black is down to 100 g (10 %)."
+    low = next(p for p in phone if p["message"].startswith("F001"))
+    assert low["data"]["tag"].endswith("_F001"), "its own notification, not the print's"
+
+
+async def test_no_low_notification_when_it_is_not_chosen(hass: HomeAssistant, k2plus, hass_ws_client, phone) -> None:
+    await _add_telling(hass, k2plus, ["finished"])
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000", weight=12)
+    await _ask(client, 2, {"type": "printer_panel/filament/confirm", "slot": "1B", "stock": "F001"})
+    await _print(hass, [(0, "box_1_slot_2"), (3356, "box_1_slot_2")])
+    await hass.async_block_till_done()
+    assert [p["message"] for p in phone if p["message"].startswith("F001")] == []
+
+
+async def test_printers_set_up_before_get_the_low_notification_and_keep_their_choices(hass: HomeAssistant, k2plus) -> None:
+    entry = await _add_telling(hass, k2plus, ["finished", "error"], minor_version=1)
+    assert entry.minor_version == 2 and entry.options["events"] == ["finished", "error", "filament_low"]
+    assert entry.options["notify"] == ["mobile_app_test"]
+
+
+async def test_the_sensors(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    hass.config.currency = "NOK"
+    entry = await _add(hass, k2plus)
+    reg = er.async_get(hass)
+    ids = {key: reg.async_get_entity_id("sensor", DOMAIN, f"{k2plus['device_id']}_{key}")
+           for key in ("filament_in_stock", "spools_in_stock", "spools_low", "last_print_filament", "last_print_filament_cost")}
+    assert all(ids.values()), ids
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    await _ask(client, 2, {"type": "printer_panel/filament/check_in", "brand": "eSun", "colour": "Pink", "hex": "#ff37af",
+                           "material": "PLA", "weight": 750, "price": 150})
+    await _ask(client, 3, {"type": "printer_panel/filament/update", "stock": "F002", "left": 60})
+    await _ask(client, 4, {"type": "printer_panel/filament/confirm", "slot": "1A", "stock": "F002"})
+    await _print(hass, [(0, "box_1_slot_1"), (3356, "box_1_slot_1")])
+    await hass.async_block_till_done()
+    state = lambda key: hass.states.get(ids[key])  # noqa: E731
+    assert float(state("filament_in_stock").state) == 1.05 and state("filament_in_stock").attributes["unit_of_measurement"] == "kg"
+    assert state("spools_in_stock").state == "2" and state("spools_low").state == "1"
+    assert state("spools_low").attributes["spools"] == [{"stock": "F002", "name": "eSun Pink", "type": "PLA", "left": 50.0}]
+    assert float(state("last_print_filament").state) == 10.0
+    cost = state("last_print_filament_cost")
+    assert float(cost.state) == 2.0 and cost.attributes["unit_of_measurement"] == "NOK", "10 g of 150 kr for 750 g"
+    assert entry.runtime_data.filament.book.last_print["file"] == FILE
+
+
+async def test_weighed_through_the_page_and_a_tag_found_by_its_colour(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    await _check_in(client, 2, "Sunlu", "Black", "#000000")
+    no_tare = await _ask(client, 3, {"type": "printer_panel/filament/update", "stock": "F001", "weighed": 800})
+    assert not no_tare["success"] and no_tare["error"]["code"] == "invalid_format"
+    weighed = await _ask(client, 4, {"type": "printer_panel/filament/update", "stock": "F001", "weighed": 800, "tare": 180})
+    assert weighed["success"] and weighed["result"]["left"] == 620.0
+    tag = await _ask(client, 5, {"type": "printer_panel/filament/tag", "stock": "F002"})
+    assert tag["success"] and tag["result"]["material"] == "Generic PLA" and tag["result"]["weight"] == 1000
+    colour = tag["result"]["tag"]
+    assert colour != "#000000" and (await _ask(client, 6, {"type": "printer_panel/filament/tag", "stock": "F002"}))["result"]["tag"] == colour
+    hass.states.async_set(SLOT_B, "Generic PLA", {"vendor": "Creality", "type": "PLA", "name": "Generic PLA", "color_hex": colour,
+                                                  "rfid": "00001", "state": 2, "selected": 0})
+    await hass.async_block_till_done()
+    assert entry.runtime_data.filament.book.slots["1B"].get("stock") == "F002", "the CFS read the tag: F002, not F001"

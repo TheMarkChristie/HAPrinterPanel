@@ -52,6 +52,7 @@ class FilamentRegister:
     def _book(data: dict[str, Any]) -> Register:
         book = Register(data)
         book.today = lambda: dt_util.now().date().isoformat()   # the house's day, not UTC's
+        book.now = lambda: dt_util.now().isoformat(timespec="minutes")
         return book
 
     # ------------------------------------------------------------------ following the printer
@@ -124,14 +125,14 @@ class FilamentRegister:
         if changed:
             self._save()
             self._tell()
+            self._send_alerts()
 
     @callback
     def _changed(self, event: Event[EventStateChangedData]) -> None:
         entity_id, new = event.data["entity_id"], event.data["new_state"]
         if entity_id == self.link.map["entities"].get("status"):
-            if new is not None and (what := self._status(new)):
-                self._save()
-                self._tell(full=what == FULL)
+            if new is not None:
+                self.settle(new)
             return
         label = next((k for k, v in self._slot_entities().items() if v == entity_id), None)
         if label is None:
@@ -140,6 +141,25 @@ class FilamentRegister:
         if info is not None and self.book.slot_seen(label, info):
             self._save()
             self._tell()
+
+    @callback
+    def settle(self, state: State) -> None:
+        """The print status changed: book it now. Printer Panel's notifications call this first when a print ends, so
+        the finished message can say what it used; the register's own look at the same change then finds it done."""
+        if what := self._status(state):
+            self._save()
+            self._tell(full=what == FULL)
+            self._send_alerts()
+
+    @callback
+    def _send_alerts(self) -> None:
+        """Spools a print took low or used up: the phones are told (if the low-filament notification is chosen)."""
+        alerts, self.book.alerts = self.book.alerts, []
+        for alert in alerts:
+            _LOGGER.info("Printer Panel: %s %s is %s, %.0f g left", alert["stock"], alert["name"],
+                         "used up" if alert["what"] == "used_up" else "low", alert["left"])
+        if alerts:
+            self.link.filament_alerts(alerts)
 
     def _active(self) -> str | None:
         state = self.hass.states.get(self.link.map["entities"].get("active_slot") or "")
@@ -207,11 +227,13 @@ class FilamentRegister:
             listener(full)
 
     def view(self, full: bool = True) -> dict[str, Any]:
-        return self.book.view() if full else {"printing": self.book.printing()}
+        if not full:
+            return {"printing": self.book.printing()}
+        return {**self.book.view(), "currency": self.hass.config.currency}
 
     # ------------------------------------------------------------------ what the page asks
-    async def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any) -> dict[str, Any]:
-        spool = self.book.check_in(brand, colour, hex_, material, weight, self.book.today())
+    async def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any, price: Any = None) -> dict[str, Any]:
+        spool = self.book.check_in(brand, colour, hex_, material, weight, self.book.today(), price)
         self._rematch()
         await self._save_now()
         self._tell()
@@ -236,6 +258,7 @@ class FilamentRegister:
             _LOGGER.info("Printer Panel: %.1f g that slot %s used came off %s", used, label, str(stock).upper())
         await self._save_now()
         self._tell()
+        self._send_alerts()
         return used
 
     async def forget(self, label: str) -> float:
@@ -245,8 +268,20 @@ class FilamentRegister:
         self._tell()
         return dropped
 
+    async def tag(self, stock: Any) -> dict[str, Any]:
+        info = self.book.tag(stock)
+        self._rematch()
+        await self._save_now()
+        self._tell()
+        return info
+
+    def last_print_of(self, file: Any) -> dict[str, Any] | None:
+        """The last print the register booked, when it is this file's."""
+        last = self.book.last_print
+        return last if last and file and last.get("file") == file else None
+
     def _rematch(self) -> None:
-        """A Creality spool checked in (or changed) while it sits in the CFS is matched to its slot at once."""
+        """A Creality spool or a tagged one checked in (or changed) while it sits in the CFS is matched to its slot at once."""
         for label, entity_id in self._slot_entities().items():
             info = self.slot_info(self.hass.states.get(entity_id))
             slot = self.book.slots.get(label)

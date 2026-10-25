@@ -113,8 +113,8 @@ def test_a_print_is_booked_to_the_slots_it_used_and_waits_where_there_is_no_numb
     assert r.view()["printing"]["1D"] == pytest.approx(f.grams(5000, "PLA"), abs=0.1)
     booked = r.end()
     purple = f.grams(5000, "PLA")   # 4000 then 1000 more, when 1D printed again
-    assert booked == [{"slot": "1B", "stock": None, "grams": round(f.grams(5000, "PLA"), 1)},
-                      {"slot": "1D", "stock": "F001", "grams": round(purple, 1)}]
+    assert booked == [{"slot": "1B", "stock": None, "grams": round(f.grams(5000, "PLA"), 1), "cost": None},
+                      {"slot": "1D", "stock": "F001", "grams": round(purple, 1), "cost": None}]
     assert r.spool("F001")["left"] == pytest.approx(1000 - purple, abs=0.05)
     assert r.view()["pending"]["1B"] == pytest.approx(f.grams(5000, "PLA"), abs=0.1) and r.job is None
     # after the print: the stock number written on the black spool
@@ -130,7 +130,7 @@ def test_confirmed_before_the_print_it_comes_off_at_the_end():
     r.confirm("1B", "F001")
     r.track("a.gcode", 0, "1B")
     r.track("a.gcode", 3356, "1B")
-    assert r.end() == [{"slot": "1B", "stock": "F001", "grams": 10.0}]
+    assert r.end() == [{"slot": "1B", "stock": "F001", "grams": 10.0, "cost": None}]
     assert r.spool("F001")["left"] == 990.0
 
 
@@ -163,7 +163,7 @@ def test_grams_from_a_slot_not_known_go_to_the_number_given_and_the_next_print_a
     r.check_in("Generic", "Black", "#000000", "PLA", 1000, DAY)
     r.track("a.gcode", 0, None)
     r.track("a.gcode", 3356, None)
-    assert r.end() == [{"slot": "?", "stock": None, "grams": 10.0}]
+    assert r.end() == [{"slot": "?", "stock": None, "grams": 10.0, "cost": None}]
     assert r.confirm("?", "F001") == pytest.approx(10.0, abs=0.05) and r.spool("F001")["left"] == 990.0
     assert "?" not in r.slots, "not a slot: the next print with no slot said waits for its number again"
     r.track("b.gcode", 3356, None)
@@ -268,3 +268,97 @@ def test_the_register_keeps_through_storage():
     r.track("a.gcode", 1200, "1D")
     again = f.Register(json.loads(json.dumps(r.to_dict())))
     assert again.to_dict() == r.to_dict() and again.next == 2
+
+
+def test_a_price_gives_each_print_its_cost_and_grams_confirmed_later_join_it():
+    r = f.Register()
+    r.now = lambda: "2026-10-25T23:00"
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY, price=199)
+    r.check_in("eSun", "Pink", "#ff37af", "PLA+", 1000, DAY, price="")
+    r.check_in("Creality", "Purple", "#9e007e", "Hyper PLA", 1000, DAY, price=249.5)
+    assert "price" not in r.spool("F002") and r.spool("F003")["price"] == 249.5
+    r.slot_seen("1B", BLACK)
+    r.slot_seen("1D", PURPLE)
+    r.confirm("1B", "F001")
+    for used, slot in ((0, "1B"), (3356, "1B"), (6712, "1D"), (10068, "1A")):
+        r.track("tag Robert.gcode", used, slot)
+    booked = r.end()
+    assert [b["cost"] for b in booked] == [None, 1.99, 2.5], "1A has no spool yet; 10 g of 199 kr a kg; 10 g of 249.50"
+    last = r.last_print
+    assert (last["file"], last["ended"], last["grams"], last["cost"], last["uncosted"]) == ("tag Robert.gcode", "2026-10-25T23:00", 30.0, 4.49, 10.0)
+    r.slot_seen("1A", {**BLACK, "hex": "#ff37af"})
+    r.confirm("1A", "F003")                      # 1A was the purple spool: its 10 g join the print at 249.50 a kg
+    assert r.last_print["cost"] == pytest.approx(6.99, abs=0.01) and r.last_print["uncosted"] == 0.0
+    with pytest.raises(f.RegisterError):
+        r.update("F001", {"price": -1})
+    r.update("F001", {"price": None})
+    assert "price" not in r.spool("F001")
+
+
+def test_a_print_taking_a_spool_low_or_using_it_up_is_an_alert():
+    r = f.Register()
+    r.today = lambda: DAY
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY)
+    r.update("F001", {"left": 110})
+    r.slot_seen("1B", BLACK)
+    r.confirm("1B", "F001")
+    r.track("a.gcode", 0, "1B")
+    r.track("a.gcode", 3356, "1B")                   # 10 g: 100 g left, 10 %
+    r.end()
+    assert r.alerts == [{"what": "low", "stock": "F001", "name": "Sunlu Black", "type": "PLA", "left": 100.0, "share": 10}]
+    r.alerts.clear()
+    r.track("b.gcode", 3356, "1B")                   # 10 g more: still low, said once
+    r.end()
+    assert r.alerts == []
+    r.track("c.gcode", 40000, "1B")                  # used up
+    r.end()
+    assert [a["what"] for a in r.alerts] == ["used_up"] and r.gone[-1]["why"] == "used_up"
+    r.alerts.clear()
+    r.update("F001", {"left": 50})                    # weighed by hand: no alert
+    assert r.alerts == []
+
+
+def test_weighed_on_a_scale_less_the_brands_empty_spool():
+    r = f.Register()
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY)
+    r.check_in("sunlu", "White", "#ffffff", "PLA", 1000, DAY)
+    with pytest.raises(f.RegisterError) as err:
+        r.update("F001", {"weighed": 800})
+    assert "empty Sunlu spool" in str(err.value)
+    assert r.update("F001", {"weighed": 800, "tare": 180.5})["left"] == 619.5
+    assert r.tares == {"sunlu": 180.5}
+    assert r.update("F002", {"weighed": 500})["left"] == 319.5, "the brand's empty spool, kept"
+    with pytest.raises(f.RegisterError):
+        r.update("F002", {"weighed": 100})
+    assert f.Register(json.loads(json.dumps(r.to_dict()))).tares == {"sunlu": 180.5}
+
+
+def test_a_tag_says_the_material_a_weight_it_can_and_a_colour_of_its_own():
+    r = f.Register()
+    for brand, colour, hex_, kind, weight in (("Sunlu", "Black", "#000000", "PLA", 1000), ("Sunlu", "Black", "#000000", "PLA", 1000),
+                                              ("eSun", "Pink", "#ff37af", "PETG", 750), ("Creality", "Teal", "#2f6f7a", "Hyper Stardust PLA", 1000),
+                                              ("Polymaker", "Grey", "#808080", "PA-CF", 3000)):
+        r.check_in(brand, colour, hex_, kind, weight, DAY)
+    tags = [r.tag(f"F00{i}") for i in range(1, 6)]
+    assert [t["material"] for t in tags] == ["Generic PLA", "Generic PLA", "Generic PETG", "Hyper Stardust PLA", "PA-CF"]
+    assert [t["weight"] for t in tags] == [1000, 1000, 750, 1000, 1000]
+    colours = [t["tag"] for t in tags]
+    assert len(set(colours)) == 5 and "#000000" not in colours, "every tag its own colour, none a Creality chip's"
+    assert all(f._near(c, h) and math.dist(*(tuple(int(x[i:i + 2], 16) for i in (1, 3, 5)) for x in (c, h))) < 11
+               for c, h in zip(colours, ("#000000", "#000000", "#ff37af", "#2f6f7a", "#808080"))), "a few shades at most"
+    assert r.tag("F001")["tag"] == colours[0], "given once, kept"
+    assert f.tag_weight(300) == 250 and f.tag_weight(520) == 500 and f.tag_weight(675) == 750
+
+
+def test_a_tagged_spool_is_found_by_the_colour_the_cfs_reads_whatever_its_brand():
+    r = f.Register()
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY)
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY)
+    second = r.tag("F002")["tag"]
+    first = r.tag("F001")["tag"]
+    read = {"loaded": True, "vendor": "Creality", "type": "PLA", "name": "Generic PLA", "rfid": "00001", "state": 2}
+    r.slot_seen("1A", {**read, "hex": first})
+    r.slot_seen("1B", {**read, "hex": second})
+    assert (r.slots["1A"].get("stock"), r.slots["1B"].get("stock")) == ("F001", "F002"), "two spools alike, told apart"
+    r.slot_seen("1C", {**read, "hex": "#000000"})
+    assert "stock" not in r.slots["1C"], "an untagged black spool still waits for its number"

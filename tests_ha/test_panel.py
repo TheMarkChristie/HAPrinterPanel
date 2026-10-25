@@ -68,7 +68,7 @@ async def test_a_finished_print_tells_the_phone_with_its_name_and_time(hass: Hom
     await hass.async_block_till_done()
     assert len(phone) == 1
     sent = phone[0]
-    assert sent["title"] == "3D printer" and sent["message"] == "GTA 6 stand - Warden of Bacon is finished, after 9 h 2 min."
+    assert sent["title"] == "3D printer" and sent["message"] == "GTA 6 stand - Warden of Bacon is finished, after 9 h 2 min. Filament: 208 g."
     assert sent["data"]["clickAction"] == "/printer" and sent["data"]["image"] == f"/api/image_proxy/{k2plus['current_print_preview']}"
 
 

@@ -82,8 +82,17 @@
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
       failed: (what, why) => `Could not ${what}: ${why}`,
       verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause", checkIn: "check it in",
-               save: "save it", remove: "remove it", confirm: "confirm it", forget: "drop them", pdf: "make the PDF" },
+               save: "save it", remove: "remove it", confirm: "confirm it", forget: "drop them", pdf: "make the PDF",
+               tag: "get the tag's details" },
       pdf: "PDF", pdfLabel: "Download the register as a PDF: the spools in stock and what has gone out of stock in the last 30 days",
+      price: (sign) => `Price (${sign}), if you like`, weighed: "Weighed on a scale (g)", tare: "Empty spool (g)",
+      needTare: (b) => `Fill in what an empty ${b} spool weighs; it is kept for ${b}.`, lighter: "That is less than an empty spool.",
+      priceRange: "The price should be from 0 to 100,000.", weighedRange: "The weights should be from 0 to 10,000 g.",
+      lastPrint: (name, g, cost) => `Last print: ${name}, ${g} g${cost ? `, ${cost}` : ""}`, nfc: "NFC tag",
+      tagTitle: (n) => `NFC tag for ${n}`,
+      tagHow: "Write a MIFARE Classic 1K tag with the CFS RFID app on an Android phone, with these:",
+      tagMaterial: "Material", tagColour: "Colour code", tagWeight: "Weight", copy: "Copy", copied: "Copied",
+      tagAfter: (n) => `Stick the tag on the spool. In the CFS, the spool is then found as ${n} on its own.`,
       inCfs: "In the CFS", onShelf: (n) => `On the shelf (${n})`, find: "Find: number, brand, colour or type", noMatch: "No spool matches.",
       forget: "Not a spool in the register: drop these grams",
       filament: "Filament", checkIn: "Check in", checkInTitle: "Check in a spool", editTitle: (n) => `Spool ${n}`,
@@ -135,8 +144,16 @@
       failed: (what, why) => `Kunne ikke ${what}: ${why}`,
       verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen",
                checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den", forget: "glemme dem",
-               pdf: "lage PDF-en" },
+               pdf: "lage PDF-en", tag: "hente brikkens detaljer" },
       pdf: "PDF", pdfLabel: "Last ned registeret som PDF: spolene på lager og det som har gått ut av lager de siste 30 dagene",
+      price: (sign) => `Pris (${sign}), om du vil`, weighed: "Veid på vekt (g)", tare: "Tom spole (g)",
+      needTare: (b) => `Fyll inn hva en tom ${b}-spole veier; den huskes for ${b}.`, lighter: "Det er mindre enn en tom spole.",
+      priceRange: "Prisen skal være fra 0 til 100 000.", weighedRange: "Vektene skal være fra 0 til 10 000 g.",
+      lastPrint: (name, g, cost) => `Siste utskrift: ${name}, ${g} g${cost ? `, ${cost}` : ""}`, nfc: "NFC-brikke",
+      tagTitle: (n) => `NFC-brikke for ${n}`,
+      tagHow: "Skriv en MIFARE Classic 1K-brikke med CFS RFID-appen på en Android-telefon, med dette:",
+      tagMaterial: "Materiale", tagColour: "Fargekode", tagWeight: "Vekt", copy: "Kopier", copied: "Kopiert",
+      tagAfter: (n) => `Fest brikken på spolen. I CFS-en blir spolen da funnet som ${n} av seg selv.`,
       inCfs: "I CFS-en", onShelf: (n) => `På hylla (${n})`, find: "Finn: nummer, merke, farge eller type", noMatch: "Ingen spole passer.",
       forget: "Ikke en spole i registeret: glem disse grammene",
       filament: "Filament", checkIn: "Sjekk inn", checkInTitle: "Sjekk inn en spole", editTitle: (n) => `Spole ${n}`,
@@ -168,6 +185,17 @@
   const ACTIVE = ["printing", "processing", "paused", "self-testing"];
   const UNKNOWN_SLOT = "?";        // the register's name for grams printed while the printer did not say which slot
   const FIND_FROM = 9;             // spools in the register before the Filament card has a box to find one
+  const SYMBOLS = { GBP: "£", EUR: "€", USD: "$" };
+  const KRONER = ["NOK", "SEK", "DKK"];
+  /** money as the notifications say it: 9.80 kr (9,80 kr in Norwegian), £9.80 */
+  function money(amount, currency, lang) {
+    const n = new Intl.NumberFormat(lang === "nb" ? "nb-NO" : "en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount);
+    const code = String(currency || "").toUpperCase();
+    if (KRONER.includes(code)) return `${n} kr`;
+    if (SYMBOLS[code]) return lang === "nb" ? `${n} ${SYMBOLS[code]}` : `${SYMBOLS[code]}${n}`;
+    return `${n} ${code}`.trim();
+  }
+  const currencySign = (code) => { const c = String(code || "").toUpperCase(); return KRONER.includes(c) ? "kr" : SYMBOLS[c] || c; };
   const BRANDS = ["Creality", "Bambu Lab", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture", "Polymaker", "Prusament", "Sunlu"];
   const TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PLA Silk", "PETG", "ABS", "ASA", "TPU", "PLA-CF", "PETG-CF", "PA-CF", "PC", "Nylon"];
   // names for the colour the CFS reads off a spool (it gives only the colour): the nearest wins
@@ -395,6 +423,13 @@
     .done .bignum { font-size: 44px; font-weight: 600; letter-spacing: 2px; text-align: center; margin: 4px 0 12px; font-variant-numeric: tabular-nums; }
     .done .donehint { margin-bottom: 18px; }
     dialog [data-fil="remove"], dialog [data-fil="clear"] { margin-right: auto; }
+    .lastprint { font-size: 14px; color: var(--secondary-text-color); margin: -4px 0 10px; }
+    .tagvals { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px 14px; align-items: center; margin: 0 0 16px; }
+    .tagvals dt { color: var(--secondary-text-color); font-size: 13px; }
+    .tagvals dd { margin: 0; display: flex; align-items: center; gap: 8px; font-weight: 500; min-height: 24px; }
+    .tagvals code { font-size: 16px; letter-spacing: 1px; }
+    .tagvals .dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; flex: 0 0 22px; }
+    dialog { max-height: 92vh; overflow: auto; box-sizing: border-box; }
     dialog { border: none; border-radius: 16px; padding: 20px; max-width: min(420px, 90vw); background: var(--card-background-color, #fff);
              color: var(--primary-text-color); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4); }
     dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
@@ -489,6 +524,7 @@
               <ha-card class="filament" hidden><h2>${esc(s.filament)}<span class="aside">
                 <button class="btn small" data-fil="pdf" title="${esc(s.pdfLabel)}" aria-label="${esc(s.pdfLabel)}"><ha-icon icon="mdi:file-pdf-box"></ha-icon>${esc(s.pdf)}</button>
                 <button class="btn small" data-fil="checkin"><ha-icon icon="mdi:plus"></ha-icon>${esc(s.checkIn)}</button></span></h2>
+                <div class="lastprint" hidden></div>
                 <div class="msg fmsg" role="status" aria-live="polite"></div>
                 <div class="waitlist"></div>
                 <input class="find" type="search" autocomplete="off" spellcheck="false" placeholder="${esc(s.find)}" aria-label="${esc(s.find)}" hidden>
@@ -548,10 +584,14 @@
               <label>${esc(s.type)}<input name="material" list="pp-types" autocomplete="off"></label>
               <div class="two"><label>${esc(s.weight)}<input name="weight" type="number" inputmode="decimal" min="1" max="10000" step="any"></label>
                 <label data-left>${esc(s.leftG)}<input name="left" type="number" inputmode="decimal" min="0" max="10000" step="any"></label></div>
+              <div class="two"><label><span class="plabel"></span><input name="price" type="number" inputmode="decimal" min="0" max="100000" step="any"></label></div>
+              <div class="two" data-weigh><label>${esc(s.weighed)}<input name="weighed" type="number" inputmode="decimal" min="0" max="10000" step="any"></label>
+                <label>${esc(s.tare)}<input name="tare" type="number" inputmode="decimal" min="0" max="10000" step="any"></label></div>
             </div>
             <div class="done" data-part="done" hidden><p></p><div class="bignum"></div><p class="donehint"></p></div>
             <div class="dmsg" role="alert"></div>
             <div class="actions"><button type="button" class="btn danger" data-fil="remove">${esc(s.remove)}</button>
+              <button type="button" class="btn" data-fil="tag"><ha-icon icon="mdi:nfc-variant"></ha-icon>${esc(s.nfc)}</button>
               <button type="button" class="btn" data-fil="close">${esc(s.cancel)}</button>
               <button type="submit" class="btn primary" data-go></button></div>
           </form></dialog>
@@ -566,6 +606,18 @@
             <div class="actions"><button type="button" class="btn" data-fil="clear">${esc(s.clear)}</button>
               <button type="button" class="btn" data-fil="close">${esc(s.cancel)}</button>
               <button type="submit" class="btn primary" data-go>${esc(s.confirm)}</button></div>
+          </form></dialog>
+          <dialog class="tagform" aria-labelledby="tg-title"><form novalidate>
+            <h3 id="tg-title"></h3><p>${esc(s.tagHow)}</p>
+            <dl class="tagvals">
+              <dt>${esc(s.tagMaterial)}</dt><dd class="tmat"></dd>
+              <dt>${esc(s.tagColour)}</dt><dd><span class="dot"></span><code class="tcol"></code>
+                <button type="button" class="btn small" data-fil="copy">${esc(s.copy)}</button></dd>
+              <dt>${esc(s.tagWeight)}</dt><dd class="twt"></dd>
+            </dl>
+            <p class="tagafter"></p>
+            <div class="dmsg" role="alert"></div>
+            <div class="actions"><button type="submit" class="btn primary" data-go>${esc(s.done)}</button></div>
           </form></dialog>
           <datalist id="pp-brands"></datalist><datalist id="pp-types"></datalist><datalist id="pp-stock"></datalist>
         </div>`;
@@ -612,7 +664,8 @@
       root.addEventListener("submit", (ev) => {
         ev.preventDefault();
         const dlg = ev.target.closest("dialog");
-        if (dlg && dlg.classList.contains("spoolform")) this._saveSpool();
+        if (dlg && dlg.classList.contains("tagform")) dlg.close();
+        else if (dlg && dlg.classList.contains("spoolform")) this._saveSpool();
         else if (dlg && dlg.classList.contains("slotform")) this._confirmSlot(false);
       });
       const dlg = root.querySelector("dialog.confirm");
@@ -1034,6 +1087,12 @@
         ...Object.entries(printing).filter(([label, g]) => g > 0 && !slots[label] && !(label in pending))
           .map(([label, g]) => [label, s.waitsNow(this._slotName(label), this._g(g, 1))]),
       ];
+      // the last print: what it used, and what that cost where its spools have a price
+      const last = reg.last_print, lastEl = card.querySelector(".lastprint");
+      const lastText = last && last.grams ? s.lastPrint(printName(last.file) || "-", this._g(last.grams, last.grams < 10 ? 1 : 0),
+                                                        last.cost != null ? this._money(last.cost) : "") : "";
+      this._text(lastEl, lastText);
+      lastEl.hidden = !lastText;
       const waitHtml = waits.map(([label, text]) => `<div class="waiting"><span>${esc(text)}</span>
         <button class="btn small" data-fil="slot" data-for="${esc(label)}">${esc(s.confirm)}</button></div>`).join("");
       const list = card.querySelector(".waitlist");
@@ -1052,7 +1111,8 @@
       const head = (text) => `<div class="boxhead"><span>${esc(text)}</span></div>`;
       const row = (x) => {
         const pct = x.weight > 0 ? Math.max(0, Math.min(100, (x.left / x.weight) * 100)) : 0;
-        const sub = [x.type, x.slot ? this._slotWhere(x.slot) : "", thisPrint[x.stock] ? s.thisPrint(this._g(thisPrint[x.stock], 1)) : ""];
+        const sub = [x.type, x.slot ? this._slotWhere(x.slot) : "", thisPrint[x.stock] ? s.thisPrint(this._g(thisPrint[x.stock], 1)) : "",
+                     x.tag ? s.nfc : ""];
         return `<div class="spool${pct <= 10 ? " low" : ""}" data-stock="${esc(x.stock)}"><span class="swatch" style="background:${colour(x.hex) || "transparent"}"></span>
           <span class="who"><b>${esc(x.stock)}</b>${esc([x.brand, x.colour].filter(Boolean).join(" "))}<small>${esc(sub.filter(Boolean).join(" · "))}</small></span>
           <span class="grams">${esc(s.gLeft(this._g(x.left)))}<small>${esc(s.ofG(this._g(x.weight)))}</small><span class="mini"><i style="width:${pct}%"></i></span></span>
@@ -1079,6 +1139,8 @@
       const what = t.dataset.fil;
       if (what === "checkin") this._openSpool(null);
       else if (what === "pdf") this._pdf(t);
+      else if (what === "tag") this._tag();
+      else if (what === "copy") this._copy(t);
       else if (what === "edit") this._openSpool(t.dataset.stock);
       else if (what === "slot") this._openSlot(t.dataset.for || t.closest("[data-slot]").dataset.slot);
       else if (what === "pick") {
@@ -1114,6 +1176,47 @@
         this._text(msg, s.failed(s.verbs.pdf, (err && err.message) || String(err)));
       } finally {
         btn.disabled = false;
+      }
+    }
+
+    _money(amount) {
+      return money(amount, this._reg && this._reg.currency, this._lang);
+    }
+
+    /* the spool's NFC tag: what to write with the phone app, its colour the spool's own a few shades off, so the CFS
+       tells this spool from any other (Home Assistant gives the colour once and keeps it) */
+    async _tag() {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.tagform"), stock = this._editing;
+      if (!dlg || !dlg.showModal || !stock) return;
+      dlg.querySelector("h3").textContent = s.tagTitle(stock);
+      ["tmat", "tcol", "twt", "tagafter"].forEach((c) => { dlg.querySelector(`.${c}`).textContent = ""; });
+      dlg.querySelector(".dot").style.background = "transparent";
+      this._say(dlg, "");
+      dlg.showModal();
+      const got = await this._ws({ type: "printer_panel/filament/tag", stock }, dlg, "tag");
+      if (!got) return;
+      const t = got.result;
+      dlg.querySelector(".tmat").textContent = t.material;
+      dlg.querySelector(".tcol").textContent = String(t.tag).toUpperCase();
+      dlg.querySelector(".dot").style.background = colour(t.tag) || "transparent";
+      dlg.querySelector(".twt").textContent = t.weight >= 1000 ? "1 kg" : `${t.weight} g`;
+      dlg.querySelector(".tagafter").textContent = s.tagAfter(stock);
+      dlg.querySelector("[data-go]").focus();
+    }
+
+    async _copy(btn) {
+      const s = this._s, code = btn.closest("dd").querySelector("code").textContent;
+      try {
+        await navigator.clipboard.writeText(code);
+        this._text(btn, s.copied);
+        setTimeout(() => this._text(btn, s.copy), 2000);
+      } catch (err) {
+        // no clipboard (a page not served over https): the code selected, to copy by hand
+        const range = document.createRange();
+        range.selectNodeContents(btn.closest("dd").querySelector("code"));
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
       }
     }
 
@@ -1244,7 +1347,14 @@
       field("material").value = v.type || "";
       field("weight").value = spool ? String(spool.weight) : "1000";
       field("left").value = spool ? String(spool.left) : "";
+      field("price").value = spool && spool.price != null ? String(spool.price) : "";
+      field("weighed").value = "";
+      const tares = (this._reg && this._reg.tares) || {};
+      field("tare").value = spool && tares[String(spool.brand).toLowerCase()] != null ? String(tares[String(spool.brand).toLowerCase()]) : "";
+      dlg.querySelector(".plabel").textContent = s.price(currencySign(this._reg && this._reg.currency) || "kr");
       dlg.querySelector("[data-left]").hidden = !spool;
+      dlg.querySelector("[data-weigh]").hidden = !spool;
+      dlg.querySelector('[data-fil="tag"]').hidden = !spool;
       dlg.querySelector('[data-part="edit"]').hidden = false;
       dlg.querySelector('[data-part="done"]').hidden = true;
       dlg.querySelector('[data-fil="remove"]').hidden = !spool;
@@ -1266,10 +1376,25 @@
       if (!brand) { no(s.need(s.brand), "brand"); return; }
       if (!material) { no(s.need(s.type), "material"); return; }
       if (!(weight > 0 && weight <= 10000)) { no(s.weightRange, "weight"); return; }
+      const priceText = field("price").value.trim(), price = Number(priceText);
+      if (priceText && !(price >= 0 && price <= 100000)) { no(s.priceRange, "price"); return; }
       const msg = { brand, colour: field("colour").value.trim(), hex: field("hex").value, material, weight };
+      if (priceText) msg.price = price;
       if (this._editing) {
-        if (leftText && !(left >= 0 && left <= 10000)) { no(s.leftRange, "left"); return; }
-        if (leftText) msg.left = left;
+        if (!priceText) msg.price = null;
+        const weighedText = field("weighed").value.trim(), tareText = field("tare").value.trim();
+        const weighed = Number(weighedText), tare = Number(tareText);
+        if (weighedText) {
+          // weighed on a scale: what is left is that less an empty spool of the brand
+          if (!(weighed >= 0 && weighed <= 10000)) { no(s.weighedRange, "weighed"); return; }
+          if (!tareText) { no(s.needTare(brand), "tare"); return; }
+          if (!(tare >= 0 && tare <= 10000)) { no(s.weighedRange, "tare"); return; }
+          if (weighed < tare) { no(s.lighter, "weighed"); return; }
+          Object.assign(msg, { weighed, tare });
+        } else {
+          if (leftText && !(left >= 0 && left <= 10000)) { no(s.leftRange, "left"); return; }
+          if (leftText) msg.left = left;
+        }
         if (await this._ws({ type: "printer_panel/filament/update", stock: this._editing, ...msg }, dlg, "save")) dlg.close();
         return;
       }
@@ -1477,5 +1602,5 @@
   });
 
   // for the tests
-  window.__printerPanel = { printName, duration, colour, colourName, slotLabel, stockNo, repairSidebarIcons };
+  window.__printerPanel = { printName, duration, colour, colourName, money, slotLabel, stockNo, repairSidebarIcons };
 })();

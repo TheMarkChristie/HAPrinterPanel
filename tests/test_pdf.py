@@ -96,3 +96,19 @@ def test_long_names_are_cut_to_their_column_and_brackets_kept():
     assert cut and cut.group(1).endswith(b"\\205"), "cut, with an ellipsis"
     assert b"K2 \\(garage\\)" in text
     assert 22 < text_width("F001", 9.5, bold=True) < 25
+
+
+def test_what_the_spools_with_a_price_are_worth():
+    r = f.Register()
+    r.check_in("Sunlu", "Black", "#000000", "PLA", 1000, DAY, price=199)
+    r.check_in("eSun", "Pink", "#ff37af", "PLA", 750, DAY, price=150)
+    r.check_in("Polymaker", "Grey", "#808080", "PLA", 1000, DAY)
+    r.update("F002", {"left": 375})
+    pdf = register_pdf(r.to_dict(), "K2", "en", MADE, "NOK")
+    assert b"2.4 kg of filament, worth 274.00 kr" in made_text(pdf)
+    assert b"verdt 274,00 kr" in made_text(register_pdf(r.to_dict(), "K2", "nb", MADE, "NOK"))
+    assert b"worth" not in made_text(register_pdf(book(), "K2", "en", MADE, "NOK")), "no prices: no worth"
+
+
+def made_text(pdf: bytes) -> bytes:
+    return b"\n".join(zlib.decompress(s) for s in re.findall(rb"/FlateDecode >>\nstream\n(.*?)\nendstream", pdf, re.S))

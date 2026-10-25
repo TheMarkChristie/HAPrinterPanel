@@ -22,7 +22,7 @@ integration supports show whatever they report (no CFS, no CFS card; no chamber,
 | Temperatures | Nozzle, bed and chamber now, with their targets: type one, or step it by 5 °C |
 | CFS | Every slot's colour, material and how much is left (low at 10 % or less), the slot in use, each box's temperature and humidity, the external spool, the colours in the print file, and the stock number of the spool in each slot |
 | Speed and fans | The print speed, stepped by 10 % or one of Silent, Standard, Sport and Ludicrous; part cooling, side and case fans, each a slider and a switch |
-| Filament | The spools checked in, with what each has left, and the slots still waiting for a stock number |
+| Filament | The spools checked in, with what each has left, the last print and what it cost, the slots still waiting for a stock number, a PDF, and what to write on an NFC tag |
 
 The page is drawn once and then only its values change, so the camera keeps playing. It follows the theme and speaks
 English or Norwegian bokmål after the user's language. On a phone the cards stack in one column.
@@ -111,6 +111,30 @@ colour, brand, type, slot, when checked in, grams left of the label's weight, lo
 of stock in the last 30 days. A spool has gone out of stock when its grams reach 0 (a print, or weighed empty) or when it
 is removed; each is kept a year, with the day and why. The link is signed by Home Assistant for a minute, as its own
 downloads are, so it works in the phone app too.
+
+**Prices and what a print cost.** A spool can have its price, when it is checked in or later. Each print's grams then
+have a cost: the Filament card says "Last print: tag Robert, 42 g, 9.80 kr", the phone's "finished" notification ends
+"Filament: 42 g, 9.80 kr.", the PDF says what the spools in stock are worth, and there is a sensor for it. Grams a print
+left waiting for a stock number join its cost once the number is given.
+
+**Weighing.** In a spool's pencil, "Weighed on a scale" less "Empty spool" sets what is left. The empty spool's weight is
+kept for the brand, so after the first spool of a brand only the scale's reading is needed. The grams worked out from
+the printer's count drift a little; a weighing puts the register right.
+
+**Low and used up.** When a print takes a spool to 10 % of its label's weight or less, or uses it up, the phones are
+told ("F014 Sunlu Black is down to 85 g (9 %).") under its own notification, not the print's. It is one of the "When"
+choices under Configure (chosen for printers set up before it).
+
+**NFC tags.** The CFS reads MIFARE Classic 1K tags in Creality's format, which a phone app writes (the CFS RFID app or
+SimplyPrint on Android; iPhones and browsers cannot write these tags). **NFC tag** in a spool's pencil says what to
+write: the material (a Creality spool's own, another brand's Generic PLA, Generic PETG and so on), the weight a tag can
+say (250 g, 500 g, 600 g, 750 g or 1 kg), and a colour code that is the spool's own colour shifted by a few shades no one
+can see, different for every spool. The printer reports no tag serial, only the material and colour, so that colour is
+what tells two black PLA spools apart: put a tagged spool in the CFS and it is found by its number with nothing to
+confirm, whatever its brand.
+
+**Sensors** on the printer's device: Filament in stock, Spools in stock, Spools low (which ones as an attribute), Last
+print filament and Last print filament cost.
 
 Change a spool (or its grams left, after weighing it) with its pencil; **Remove** takes it out of the register. The
 register is kept in Home Assistant's storage, a print under way when Home Assistant restarts is taken up where it was,

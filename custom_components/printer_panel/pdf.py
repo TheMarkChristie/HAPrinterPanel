@@ -13,6 +13,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .filament import RECENT_DAYS, REMOVED, Register, colour_hex
+from .printer import money
 
 W, H = 595.28, 841.89           # A4, in points
 LEFT, RIGHT, TOP, BOTTOM = 40.0, 555.0, 800.0, 56.0
@@ -30,7 +31,7 @@ TEXT = {
     "en": {
         "title": "Filament register", "in_stock": "In stock ({n})", "none_in": "No spools in stock.",
         "gone": "Gone out of stock in the last {days} days ({n})", "none_gone": "Nothing has gone out of stock in the last {days} days.",
-        "summary": "{n} spools in stock, {kg} kg of filament", "low": "{n} low (10 % or less)",
+        "summary": "{n} spools in stock, {kg} kg of filament", "worth": ", worth {value}", "low": "{n} low (10 % or less)",
         "stock_cols": ("No.", "Brand", "Colour", "Type", "Where", "Checked in", "Left (g)", "Of (g)"),
         "gone_cols": ("No.", "Brand", "Colour", "Type", "Weight (g)", "Checked in", "Out", "Why"),
         "why": {"used_up": "Used up", "removed": "Removed"}, "ext": "Ext",
@@ -43,7 +44,7 @@ TEXT = {
         "title": "Filamentregister", "in_stock": "På lager ({n})", "none_in": "Ingen spoler på lager.",
         "gone": "Gått ut av lager de siste {days} dagene ({n})",
         "none_gone": "Ingenting har gått ut av lager de siste {days} dagene.",
-        "summary": "{n} spoler på lager, {kg} kg filament", "low": "{n} med lite igjen (10 % eller mindre)",
+        "summary": "{n} spoler på lager, {kg} kg filament", "worth": ", verdt {value}", "low": "{n} med lite igjen (10 % eller mindre)",
         "stock_cols": ("Nr.", "Merke", "Farge", "Type", "Hvor", "Sjekket inn", "Igjen (g)", "Av (g)"),
         "gone_cols": ("Nr.", "Merke", "Farge", "Type", "Vekt (g)", "Sjekket inn", "Ut", "Hvorfor"),
         "why": {"used_up": "Brukt opp", "removed": "Fjernet"}, "ext": "Ekst.",
@@ -163,8 +164,9 @@ class _Doc:
         return bytes(out)
 
 
-def register_pdf(data: dict[str, Any], printer: str, lang: str, made: datetime) -> bytes:
-    """The register (as stored) as a PDF: printer is the printer's name for the heading, made the time it was made."""
+def register_pdf(data: dict[str, Any], printer: str, lang: str, made: datetime, currency: str | None = None) -> bytes:
+    """The register (as stored) as a PDF: printer is the printer's name for the heading, made the time it was made, currency
+    the house's (for what the spools with a price are worth)."""
     t = TEXT["nb" if lang == "nb" else "en"]
     book = Register(data)
     book.today = lambda: made.date().isoformat()
@@ -179,6 +181,9 @@ def register_pdf(data: dict[str, Any], printer: str, lang: str, made: datetime) 
                                                               hm=made.strftime("%H:%M")), size=10, rgb=GREY)
     doc.y -= 15
     summary = t["summary"].format(n=len(in_stock), kg=_n(sum(s["left"] for s in in_stock) / 1000, t, 1))
+    priced = [s for s in in_stock if s.get("price") is not None and s["weight"] > 0]
+    if priced:      # what is left of the spools with a price, at that price
+        summary += t["worth"].format(value=money(sum(s["left"] * s["price"] / s["weight"] for s in priced), currency, lang))
     doc.text(LEFT, doc.y, summary + (f" · {t['low'].format(n=len(low))}" if low else ""), size=10)
     doc.y -= 30
 

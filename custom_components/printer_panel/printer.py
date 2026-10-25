@@ -28,7 +28,8 @@ SLICER_SUFFIX = re.compile(r"(?:_[A-Z][A-Z0-9+-]*)+_(?:\d+d)?(?:\d+h)?\d+m(?:\d+
 GCODE_EXT = re.compile(r"\.(?:gcode|gco|g|bgcode)$", re.I)
 
 ACTIVE = ("printing", "processing", "paused", "self-testing")
-EVENTS = ("finished", "paused", "runout", "error")
+EVENTS = ("finished", "paused", "runout", "error", "filament_low")
+SYMBOLS = {"GBP": "£", "EUR": "€", "USD": "$"}
 
 
 def resolve(entries: Iterable[dict[str, Any]]) -> dict[str, Any]:
@@ -117,6 +118,9 @@ WORDS = {
         "paused_line": "{name} is paused at line {line}, as asked.",
         "runout": "{name}: the filament ran out at {progress} %.",
         "error": "{name} stopped with an error at {progress} %.",
+        "filament_low": "{spool} is down to {left} g ({share} %).",
+        "filament_used_up": "{spool} is used up.",
+        "used": " Filament: {grams} g{cost}.",
     },
     "nb": {
         "title": "3D-skriver",
@@ -126,6 +130,9 @@ WORDS = {
         "paused_line": "{name} er satt på pause ved linje {line}, som du ba om.",
         "runout": "{name}: filamentet gikk tomt ved {progress} %.",
         "error": "{name} stoppet med en feil ved {progress} %.",
+        "filament_low": "{spool} er nede i {left} g ({share} %).",
+        "filament_used_up": "{spool} er brukt opp.",
+        "used": " Filament: {grams} g{cost}.",
     },
 }
 
@@ -147,3 +154,42 @@ def message(event: str, lang: str, name: str | None, progress: Any, job_time: An
     text = words[event].format(name=name or words["unnamed"], progress=pct, time=duration(job_time, lang) or "-",
                                line=line if line is not None else "-")
     return words["title"], text
+
+
+def _number(value: float, lang: str, digits: int) -> str:
+    text = f"{value:,.{digits}f}"
+    return text.replace(",", " ").replace(".", ",") if lang == "nb" else text
+
+
+def money(amount: float, currency: Any, lang: Any = "en") -> str:
+    """9.80 kr (9,80 kr in Norwegian), £9.80, 9.80 CHF."""
+    lang = language(lang)
+    text, code = _number(float(amount), lang, 2), str(currency or "").upper()
+    if code in ("NOK", "SEK", "DKK"):
+        return f"{text} kr"
+    if code in SYMBOLS:
+        return f"{SYMBOLS[code]}{text}" if lang == "en" else f"{text} {SYMBOLS[code]}"
+    return f"{text} {code}".strip()
+
+
+def grams_text(grams: float, lang: Any = "en") -> str:
+    """42 g of a print as 42; under 10 g with a decimal, 4.9 (4,9)."""
+    return _number(float(grams), language(lang), 1 if grams < 10 else 0)
+
+
+def filament_used(last: dict[str, Any] | None, currency: Any, lang: Any) -> str:
+    """What a finished print used, for its notification: ' Filament: 42 g, 9.80 kr.' (no price known: ' Filament: 42 g.')."""
+    if not last or not last.get("grams"):
+        return ""
+    lang = language(lang)
+    cost = f", {money(last['cost'], currency, lang)}" if last.get("cost") is not None else ""
+    return WORDS[lang]["used"].format(grams=grams_text(last["grams"], lang), cost=cost)
+
+
+def filament_message(alert: dict[str, Any], lang: Any) -> tuple[str, str]:
+    """The notification for a spool a print took low or used up: 'F014 Sunlu Black is down to 85 g (9 %).'"""
+    lang = language(lang)
+    words = WORDS[lang]
+    spool = " ".join(filter(None, (alert.get("stock"), alert.get("name"))))
+    key = "filament_used_up" if alert.get("what") == "used_up" else "filament_low"
+    return words["title"], words[key].format(spool=spool, left=grams_text(alert.get("left") or 0, lang), share=alert.get("share", 0))

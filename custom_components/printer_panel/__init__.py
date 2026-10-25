@@ -27,7 +27,7 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
 from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
+from .const import CONF_EVENTS, DEFAULT_EVENTS, DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
 from .linepause import STORE_VERSION
 from .link import PrinterLink
@@ -35,7 +35,7 @@ from .pdf import register_pdf
 from .register import STORE_VERSION as FILAMENT_STORE_VERSION
 
 WWW = Path(__file__).parent / "www"
-PLATFORMS = [Platform.NUMBER, Platform.SWITCH]
+PLATFORMS = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 _STATIC = f"{DOMAIN}_static"
 _SCRIPT_URL = f"{DOMAIN}_script_url"
 
@@ -74,6 +74,17 @@ def _path(hass: HomeAssistant, entry: ConfigEntry) -> str:
     ids = [e.entry_id for e in hass.config_entries.async_entries(DOMAIN)]
     index = ids.index(entry.entry_id) if entry.entry_id in ids else 0
     return PANEL_PATH if index == 0 else f"{PANEL_PATH}-{index + 1}"
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """1.2 (0.5.0): the notification when a print takes a spool low, chosen for printers set up before it (Mark asked
+    for it)."""
+    if entry.version == 1 and entry.minor_version < 2:
+        events = list(entry.options[CONF_EVENTS]) if CONF_EVENTS in entry.options else list(DEFAULT_EVENTS)
+        if "filament_low" not in events:
+            events.append("filament_low")
+        hass.config_entries.async_update_entry(entry, options={**entry.options, CONF_EVENTS: events}, minor_version=2)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -117,7 +128,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def register_commands(hass: HomeAssistant) -> None:
     """What the page asks Home Assistant: its printer, where the printer is in its file, and the filament register."""
     for command in (ws_config, ws_position, ws_filament_subscribe, ws_filament_check_in, ws_filament_update,
-                    ws_filament_remove, ws_filament_confirm, ws_filament_forget):
+                    ws_filament_remove, ws_filament_confirm, ws_filament_forget, ws_filament_tag):
         websocket_api.async_register_command(hass, command)
 
 
@@ -157,6 +168,7 @@ async def ws_position(hass: HomeAssistant, connection: websocket_api.ActiveConne
 # ------------------------------------------------------------------------------------------------ the filament register
 _NO_PRINTER = ("not_found", "No printer is set up in Printer Panel")
 _WEIGHT = vol.All(vol.Coerce(float), vol.Range(min=0, max=10000))
+_PRICE = vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100000)))
 
 
 async def _filament_call(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any], work) -> None:
@@ -197,22 +209,25 @@ def ws_filament_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveC
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/filament/check_in", vol.Optional("entry_id"): str, vol.Required("brand"): str,
     vol.Optional("colour", default=""): str, vol.Optional("hex", default=""): str, vol.Required("material"): str,
-    vol.Required("weight"): _WEIGHT})
+    vol.Required("weight"): _WEIGHT, vol.Optional("price"): _PRICE})
 @websocket_api.async_response
 async def ws_filament_check_in(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """A spool checked in: brand, colour, type and the weight on its label. Answers with it and its stock number."""
+    """A spool checked in: brand, colour, type, the weight on its label and (if given) its price. Answers with it and
+    its stock number."""
     await _filament_call(hass, connection, msg, lambda r: r.check_in(msg["brand"], msg["colour"], msg["hex"],
-                                                                     msg["material"], msg["weight"]))
+                                                                     msg["material"], msg["weight"], msg.get("price")))
 
 
 @websocket_api.websocket_command({
     vol.Required("type"): f"{DOMAIN}/filament/update", vol.Optional("entry_id"): str, vol.Required("stock"): str,
     vol.Optional("brand"): str, vol.Optional("colour"): str, vol.Optional("hex"): str, vol.Optional("material"): str,
-    vol.Optional("weight"): _WEIGHT, vol.Optional("left"): _WEIGHT})
+    vol.Optional("weight"): _WEIGHT, vol.Optional("left"): _WEIGHT, vol.Optional("price"): _PRICE,
+    vol.Optional("weighed"): _WEIGHT, vol.Optional("tare"): _WEIGHT})
 @websocket_api.async_response
 async def ws_filament_update(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """A spool's details changed, or its grams left (weighed, say)."""
-    fields = {k: msg[k] for k in ("brand", "colour", "hex", "weight", "left") if k in msg}
+    """A spool's details changed, its price, or its grams left: given, or weighed on a scale (weighed) less an empty
+    spool of its brand (tare, kept for the brand once given)."""
+    fields = {k: msg[k] for k in ("brand", "colour", "hex", "weight", "left", "price", "weighed", "tare") if k in msg}
     if "material" in msg:
         fields["type"] = msg["material"]
     await _filament_call(hass, connection, msg, lambda r: r.update(msg["stock"], fields))
@@ -249,6 +264,15 @@ async def ws_filament_forget(hass: HomeAssistant, connection: websocket_api.Acti
     await _filament_call(hass, connection, msg, work)
 
 
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/filament/tag", vol.Optional("entry_id"): str,
+                                  vol.Required("stock"): str})
+@websocket_api.async_response
+async def ws_filament_tag(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """What to write on a spool's NFC tag with a phone app: the material, the weight a tag can say, and the tag's own
+    colour (the spool's, a few shades off, so the CFS tells the spool from any other)."""
+    await _filament_call(hass, connection, msg, lambda r: r.tag(msg["stock"]))
+
+
 class FilamentPdfView(HomeAssistantView):
     """The filament register as a PDF to download: the spools in stock and what has gone out of stock in the last 30
     days, in English or Norwegian (nb). The page asks Home Assistant to sign the path, as its own downloads do, so the
@@ -267,6 +291,6 @@ class FilamentPdfView(HomeAssistantView):
         device = link.describe().get("name") or entry.title
         made = dt_util.now()
         data = copy.deepcopy(link.filament.book.to_dict())   # a print may change the register while the PDF is drawn
-        body = await hass.async_add_executor_job(register_pdf, data, device, lang, made)
+        body = await hass.async_add_executor_job(register_pdf, data, device, lang, made, hass.config.currency)
         return web.Response(body=body, content_type="application/pdf",
                             headers={"Content-Disposition": f'attachment; filename="filament-{made.date().isoformat()}.pdf"'})

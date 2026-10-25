@@ -1,7 +1,7 @@
 """One printer in Home Assistant: its entities (found again whenever the entity registry changes, so a rename is
 followed), what the Printer page is told about it, the phone notifications when a print finishes, pauses, runs out of
-filament or stops with an error, the way to its Moonraker (for counting lines and the pause at one), and its filament
-register."""
+filament or stops with an error (and when a print takes a spool low), the way to its Moonraker (for counting lines and
+the pause at one), and its filament register."""
 from __future__ import annotations
 
 import logging
@@ -18,7 +18,7 @@ from .const import (CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, COUNT_SUF
                     DOMAIN, PAUSE_AT_LINE_SUFFIX, SOURCE_DOMAIN)
 from .linepause import LinePause
 from .moonraker import Moonraker, MoonrakerError
-from .printer import filament_event, message, print_event, print_name, resolve
+from .printer import filament_event, filament_message, filament_used, message, print_event, print_name, resolve
 from .register import FilamentRegister
 
 _LOGGER = logging.getLogger(__name__)
@@ -129,6 +129,7 @@ class PrinterLink:
             what = print_event(before, after)
             if after in ("completed", "stopped", "error", "idle"):
                 self.line_pause.forget_lines()
+                self.filament.settle(new)    # booked before the phones are told, so 'finished' can say what it used
         else:
             what = filament_event(before, after)
         line = self.line_pause.take_fired() if what == "paused" else None
@@ -165,14 +166,32 @@ class PrinterLink:
         job = job_state.state if job_state else (status.attributes.get("job_time_s") if status else None)
         title, text = message("paused_line" if what == "paused" and line else what, self.hass.config.language, name,
                               progress, job, line)
+        if what == "finished":
+            last = self.filament.last_print_of(status.attributes.get("file") if status else None)
+            text += filament_used(last, self.hass.config.currency, self.hass.config.language)
         data: dict[str, Any] = {"tag": f"printer_panel_{self.entry.entry_id}", "group": "printer",
                                 "clickAction": f"/{self.path}", "url": f"/{self.path}"}
         if picture := self._picture():
             data["image"] = picture
         return {"title": title, "message": text, "data": data}
 
+    @callback
+    def filament_alerts(self, alerts: list[dict[str, Any]]) -> None:
+        """Spools a print took low (10 % or less) or used up: each its own notification, under its own tag so it does not
+        replace the print's."""
+        if "filament_low" not in (self.entry.options.get(CONF_EVENTS) or DEFAULT_EVENTS) or not self.entry.options.get(CONF_NOTIFY):
+            return
+        for alert in alerts:
+            title, text = filament_message(alert, self.hass.config.language)
+            payload = {"title": title, "message": text,
+                       "data": {"tag": f"printer_panel_{self.entry.entry_id}_{alert['stock']}", "group": "printer",
+                                "clickAction": f"/{self.path}", "url": f"/{self.path}"}}
+            self.hass.async_create_task(self._send("filament_low", payload), "printer_panel filament_low")
+
     async def _notify(self, what: str, line: int | None = None) -> None:
-        payload = self.notification(what, line)
+        await self._send(what, self.notification(what, line))
+
+    async def _send(self, what: str, payload: dict[str, Any]) -> None:
         for target in self.entry.options.get(CONF_NOTIFY) or []:
             if not self.hass.services.has_service("notify", target):
                 if target not in self._missing_targets:

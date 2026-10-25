@@ -16,12 +16,17 @@ we can have a stock number written on it so we can confirm before or after the p
 - A spool whose grams reach 0 (a print, or weighed empty) or that is taken out of the register has gone out of stock:
   noted with the day and why, kept a year, and the last 30 days are in the register's PDF ("a pdf with the list and
   what has gone out of stock recently").
+- Mark asked for more the same evening: a spool's price (optional) gives each print a filament cost; a spool weighed on
+  a scale, less the empty spool's weight (kept per brand), sets what is left; a print taking a spool to 10 % or less,
+  or using it up, is an alert for the phones; and a spool can have an NFC tag the CFS reads, written with a phone app,
+  whose colour is the spool's own nudged by a few shades no one can see, so the CFS tells every tagged spool apart
+  (its telemetry carries no tag serial: two tags of the same material and colour look the same).
 """
 from __future__ import annotations
 
 import math
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable
 
 DIAMETER_MM = 1.75
@@ -35,7 +40,16 @@ MAX_WEIGHT = 10000          # g; a 10 kg spool is the largest anyone checks in
 UNKNOWN_SLOT = "?"          # where grams go while the printer does not say which slot is printing
 RECENT_DAYS = 30            # "recently" gone out of stock, for the PDF
 GONE_KEEP_DAYS = 365       # how long a spool gone out of stock is remembered
-USED_UP, REMOVED = "used_up", "removed"
+USED_UP, REMOVED, LOW = "used_up", "removed", "low"
+LOW_SHARE = 0.10            # a spool with this share of its label's weight left, or less, is low
+MAX_PRICE = 100000          # what a spool can have cost, in the house's currency
+TAG_WEIGHTS = (250, 500, 600, 750, 1000)   # g: the weights a CFS tag can say
+GENERIC_TAG = ("PLA", "PETG", "ABS", "ASA", "TPU")   # a type the CFS knows as Generic <type> for other brands' spools
+TAG_SHIFT = 6               # a tag's colour is the spool's own within this much on each of red, green and blue
+# the shifts a tag's colour can take, smallest first: never none, so a tag is never the colour of a Creality spool's chip
+_SHIFTS = sorted(((r, g, b) for r in range(-TAG_SHIFT, TAG_SHIFT + 1) for g in range(-TAG_SHIFT, TAG_SHIFT + 1)
+                  for b in range(-TAG_SHIFT, TAG_SHIFT + 1) if (r, g, b) != (0, 0, 0)),
+                 key=lambda d: (d[0] ** 2 + d[1] ** 2 + d[2] ** 2, d))
 HEX = re.compile(r"^#?([0-9a-f]{6})(?:[0-9a-f]{2})?$", re.I)
 SLOT_STATE = re.compile(r"box\D*(\d+)\D*slot\D*(\d+)", re.I)
 
@@ -85,6 +99,30 @@ def slot_key(info: dict[str, Any] | None) -> str | None:
     return "|".join(str(info.get(k) or "") for k in ("vendor", "type", "name", "hex", "rfid", "state"))
 
 
+def tag_colour(base: str, taken: set[str]) -> str:
+    """A tag's colour: the spool's own, shifted by the smallest amount no other tag has."""
+    r, g, b = (int(base[i:i + 2], 16) for i in (1, 3, 5))
+    for dr, dg, db in _SHIFTS:
+        c = (r + dr, g + dg, b + db)
+        if all(0 <= v <= 255 for v in c) and (hex_ := "#%02x%02x%02x" % c) not in taken:
+            return hex_
+    raise RegisterError("invalid", "No tag colour is free near this one")
+
+
+def tag_weight(weight: float) -> int:
+    """The weight a tag says, the nearest it can (250 g, 500 g, 600 g, 750 g or 1 kg)."""
+    return min(TAG_WEIGHTS, key=lambda w: (abs(w - weight), -w))
+
+
+def tag_material(spool: dict[str, Any]) -> str:
+    """The material to pick in the tag-writing app: a Creality spool's own product, another brand's Generic <type>."""
+    kind = str(spool.get("type") or "").strip()
+    if "creality" in str(spool.get("brand") or "").lower():
+        return kind
+    base = base_type(kind)
+    return f"Generic {base}" if base in GENERIC_TAG else base
+
+
 class RegisterError(ValueError):
     """A request the register says no to: key is not_found or invalid, detail says why."""
 
@@ -104,11 +142,15 @@ class Register:
         self.pending: dict[str, dict[str, Any]] = {k: dict(v) for k, v in (data.get("pending") or {}).items()}
         self.job: dict[str, Any] | None = dict(data["job"]) if data.get("job") else None
         self.gone: list[dict[str, Any]] = [dict(g) for g in data.get("gone") or []]
+        self.tares: dict[str, float] = dict(data.get("tares") or {})      # brand (lower case) -> its empty spool, g
+        self.last_print: dict[str, Any] | None = dict(data["last_print"]) if data.get("last_print") else None
+        self.alerts: list[dict[str, Any]] = []      # spools a print took low or used up, for the phones (not kept)
         self.today: Callable[[], str] = lambda: date.today().isoformat()
+        self.now: Callable[[], str] = lambda: datetime.now().isoformat(timespec="minutes")
 
     def to_dict(self) -> dict[str, Any]:
         return {"next": self.next, "spools": self.spools, "slots": self.slots, "pending": self.pending, "job": self.job,
-                "gone": self.gone}
+                "gone": self.gone, "tares": self.tares, "last_print": self.last_print}
 
     # ------------------------------------------------------------------ spools
     def spool(self, stock: Any) -> dict[str, Any] | None:
@@ -137,7 +179,25 @@ class Register:
             raise RegisterError("invalid", f"The {what} should be between 0 and {MAX_WEIGHT} g")
         return grams_
 
-    def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any, day: str) -> dict[str, Any]:
+    @staticmethod
+    def _price(value: Any) -> float | None:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            price = round(float(value), 2)
+        except (TypeError, ValueError):
+            raise RegisterError("invalid", "The price is not a number") from None
+        if not 0 <= price <= MAX_PRICE:
+            raise RegisterError("invalid", f"The price should be between 0 and {MAX_PRICE}")
+        return price
+
+    @staticmethod
+    def _cost(spool: dict[str, Any], used: float) -> float | None:
+        """What grams of a spool cost, from its price for the label's weight; None when it has no price."""
+        return used * spool["price"] / spool["weight"] if spool.get("price") is not None and spool["weight"] > 0 else None
+
+    def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any, day: str,
+                 price: Any = None) -> dict[str, Any]:
         """A new spool, with the next stock number."""
         weight_g = self._weight(weight, "weight")
         if weight_g <= 0:
@@ -145,6 +205,8 @@ class Register:
         spool = {"stock": f"F{self.next:03d}", "brand": self._text(brand, "brand"), "colour": self._text(colour, "colour", False),
                  "hex": colour_hex(hex_) or "#808080", "type": self._text(material, "type"), "weight": weight_g,
                  "left": weight_g, "checked_in": day}
+        if (price_ := self._price(price)) is not None:
+            spool["price"] = price_
         self.next += 1
         self.spools.append(spool)
         return spool
@@ -161,6 +223,21 @@ class Register:
             spool["type"] = self._text(fields["type"], "type")
         if "weight" in fields:
             spool["weight"] = self._weight(fields["weight"], "weight")
+        if "price" in fields:
+            if (price := self._price(fields["price"])) is None:
+                spool.pop("price", None)
+            else:
+                spool["price"] = price
+        if fields.get("tare") is not None:
+            self.tares[spool["brand"].lower()] = self._weight(fields["tare"], "empty spool's weight")
+        if fields.get("weighed") is not None:
+            # weighed on a scale: what is left is the spool less an empty one of its brand
+            weighed, tare = self._weight(fields["weighed"], "weighed spool"), self.tares.get(spool["brand"].lower())
+            if tare is None:
+                raise RegisterError("invalid", f"The weight of an empty {spool['brand']} spool is needed once")
+            if weighed < tare:
+                raise RegisterError("invalid", "The spool weighs less than an empty one")
+            fields = {**fields, "left": round(weighed - tare, 1)}
         if "left" in fields:
             before, spool["left"] = spool["left"], self._weight(fields["left"], "weight left")
             if before > 0 and spool["left"] <= 0:
@@ -180,11 +257,28 @@ class Register:
                 slot.pop("how", None)
 
     def _take(self, spool: dict[str, Any], used: float) -> None:
-        """Grams off a spool; one that runs out has gone out of stock."""
+        """A print's grams off a spool; one that runs out has gone out of stock. Taken low or used up, it is an alert."""
         before = spool["left"]
         spool["left"] = round(max(0.0, before - used), 1)
         if before > 0 and spool["left"] <= 0:
             self._gone(spool, USED_UP)
+            self.alerts.append(self._alert(spool, USED_UP))
+        elif spool["weight"] > 0 and before > spool["weight"] * LOW_SHARE >= spool["left"]:
+            self.alerts.append(self._alert(spool, LOW))
+
+    @staticmethod
+    def _alert(spool: dict[str, Any], what: str) -> dict[str, Any]:
+        return {"what": what, "stock": spool["stock"], "name": " ".join(filter(None, (spool["brand"], spool.get("colour")))),
+                "type": spool["type"], "left": spool["left"],
+                "share": round(spool["left"] / spool["weight"] * 100) if spool["weight"] > 0 else 0}
+
+    def tag(self, stock: Any) -> dict[str, Any]:
+        """What to write on a spool's NFC tag: its colour (the spool's own, a few shades off, given it once and kept), the
+        material to pick and the weight a tag can say."""
+        spool = self._need(stock)
+        if not spool.get("tag"):
+            spool["tag"] = tag_colour(spool["hex"], {s["tag"] for s in self.spools if s.get("tag")})
+        return {"stock": spool["stock"], "tag": spool["tag"], "material": tag_material(spool), "weight": tag_weight(spool["weight"])}
 
     def _gone(self, spool: dict[str, Any], why: str) -> None:
         day = self.today()
@@ -219,11 +313,16 @@ class Register:
         return True
 
     def match(self, label: str, info: dict[str, Any]) -> str | None:
-        """The one Creality spool in the register of the CFS's type (or the product it names, Hyper Stardust say) and
-        colour, not in another slot and not empty."""
+        """The spool whose tag the CFS read (its colour is that tag's own), whatever its brand; else the one Creality
+        spool in the register of the CFS's type (or the product it names, Hyper Stardust say) and colour, not in another
+        slot and not empty."""
+        elsewhere = {s.get("stock") for k, s in self.slots.items() if k != label}
+        read = colour_hex(info.get("hex"))
+        tagged = [s for s in self.spools if read and s.get("tag") == read and s["stock"] not in elsewhere]
+        if len(tagged) == 1:
+            return tagged[0]["stock"]
         if "creality" not in str(info.get("vendor") or "").lower():
             return None
-        elsewhere = {s.get("stock") for k, s in self.slots.items() if k != label}
         product = str(info.get("name") or "").strip().lower()
         found = [s for s in self.spools
                  if "creality" in s["brand"].lower()
@@ -254,6 +353,11 @@ class Register:
             return 0.0
         used = grams(float(waiting.get("mm") or 0), spool["type"])
         self._take(spool, used)
+        last = self.last_print
+        if last and waiting.get("print") == last.get("ended") and (cost := self._cost(spool, used)) is not None:
+            # grams the last print left waiting: now they have a spool, and so a price
+            last["cost"] = round((last.get("cost") or 0) + cost, 2)
+            last["uncosted"] = round(max(0.0, float(last.get("uncosted") or 0) - used), 1)
         return used
 
     def forget(self, label: str) -> float:
@@ -290,9 +394,13 @@ class Register:
         return booked
 
     def end(self) -> list[dict[str, Any]]:
-        """The print is over: each slot's length off its spool, or onto what waits for the slot's stock number."""
+        """The print is over: each slot's length off its spool, or onto what waits for the slot's stock number. The print
+        is the last print: its grams, and what they cost where the spools have a price."""
         job, self.job = self.job, None
         booked: list[dict[str, Any]] = []
+        ended = self.now()
+        total = cost = uncosted = 0.0
+        priced = False
         for label, mm in sorted((job or {}).get("used", {}).items()):
             if mm <= 0:
                 continue
@@ -301,13 +409,27 @@ class Register:
             if spool is not None:
                 used = grams(mm, spool["type"])
                 self._take(spool, used)
-                booked.append({"slot": label, "stock": spool["stock"], "grams": round(used, 1)})
+                worth = self._cost(spool, used)
+                booked.append({"slot": label, "stock": spool["stock"], "grams": round(used, 1),
+                               "cost": round(worth, 2) if worth is not None else None})
+                total += used
+                if worth is None:
+                    uncosted += used
+                else:
+                    cost, priced = cost + worth, True
             else:
                 waiting = self.pending.setdefault(label, {"mm": 0.0, "type": slot.get("type") or "", "key": slot.get("key")})
                 # grams an earlier spool in this slot left unconfirmed join these: the number given takes them all
                 waiting["key"] = slot.get("key")
                 waiting["mm"] = round(float(waiting["mm"]) + mm, 1)
-                booked.append({"slot": label, "stock": None, "grams": round(grams(mm, slot.get("type")), 1)})
+                waiting["print"] = ended
+                used = grams(mm, slot.get("type"))
+                booked.append({"slot": label, "stock": None, "grams": round(used, 1), "cost": None})
+                total += used
+                uncosted += used
+        if total > 0:
+            self.last_print = {"file": (job or {}).get("file"), "ended": ended, "grams": round(total, 1),
+                               "cost": round(cost, 2) if priced else None, "uncosted": round(uncosted, 1)}
         return booked
 
     # ------------------------------------------------------------------ the page
@@ -324,6 +446,8 @@ class Register:
             "slots": {k: {"stock": v.get("stock"), "how": v.get("how")} for k, v in self.slots.items() if v.get("stock")},
             "pending": {k: round(grams(float(v.get("mm") or 0), slot_type(k) or v.get("type")), 1) for k, v in self.pending.items()},
             "printing": self.printing(),
+            "tares": self.tares,
+            "last_print": self.last_print,
         }
 
     def printing(self) -> dict[str, float]:

@@ -39,7 +39,8 @@
         "finished": "A print is finished",
         "paused": "A print is paused",
         "runout": "The filament runs out",
-        "error": "A print stops with an error"
+        "error": "A print stops with an error",
+        "filament_low": "A print takes a spool low (10 % or less) or uses it up"
       }
     }
   },
@@ -47,6 +48,23 @@
     "number": {
       "pause_at_line": {
         "name": "Pause at G-code line"
+      }
+    },
+    "sensor": {
+      "filament_in_stock": {
+        "name": "Filament in stock"
+      },
+      "spools_in_stock": {
+        "name": "Spools in stock"
+      },
+      "spools_low": {
+        "name": "Spools low"
+      },
+      "last_print_filament": {
+        "name": "Last print filament"
+      },
+      "last_print_filament_cost": {
+        "name": "Last print filament cost"
       }
     },
     "switch": {
