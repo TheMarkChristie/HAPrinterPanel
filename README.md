@@ -83,7 +83,9 @@ These are entities of Printer Panel's own on the printer's device, so automation
 
 **Check in** a spool on the Filament card with its brand, colour (a name and a swatch), type and the weight on its
 label. It gets the next stock number, F001, F002 and on (a number is never given out twice), and the page says to write
-it on the spool.
+it on the spool. A spool already in the CFS can be checked in **from the CFS**: pick its slot and the brand (the
+printer's vendor, unless it says Generic), the colour with a name for it, and the type (Creality's product, "Hyper
+Stardust PLA") are filled in from what the CFS reads; checked in, it is that slot's spool.
 
 The CFS says what is in each slot, and the register follows it:
 

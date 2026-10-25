@@ -75,7 +75,7 @@
       temps: "Temperatures", nozzle: "Nozzle", bed: "Bed", chamber: "Chamber", target: "Target", off2: "off", onW: "On", offW: "Off",
       lower: (w) => `Lower the ${w} target`, raise: (w) => `Raise the ${w} target`, setTarget: (w) => `${w} target`,
       cfs: "CFS", box: (n) => `Box ${n}`, external: "External spool", empty: "Empty", low: "Low", inUse: "In use",
-      notSet: "Spool in, not set on the printer",
+      notSet: "Spool in, not set on the printer", notSetShort: "not set", fromCfs: "From the CFS",
       uses: "Colours in the print file", remaining: (p) => `${p} % left`,
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -126,7 +126,7 @@
       temps: "Temperaturer", nozzle: "Dyse", bed: "Plate", chamber: "Kammer", target: "Mål", off2: "av", onW: "På", offW: "Av",
       lower: (w) => `Senk målet for ${w.toLowerCase()}`, raise: (w) => `Øk målet for ${w.toLowerCase()}`, setTarget: (w) => `Mål for ${w.toLowerCase()}`,
       cfs: "CFS", box: (n) => `Boks ${n}`, external: "Ekstern spole", empty: "Tom", low: "Lite igjen", inUse: "I bruk",
-      notSet: "Spole i, ikke angitt på skriveren",
+      notSet: "Spole i, ikke angitt på skriveren", notSetShort: "ikke angitt", fromCfs: "Fra CFS-en",
       uses: "Farger i utskriftsfilen", remaining: (p) => `${p} % igjen`,
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -167,6 +167,15 @@
   const FIND_FROM = 9;             // spools in the register before the Filament card has a box to find one
   const BRANDS = ["Creality", "Bambu Lab", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture", "Polymaker", "Prusament", "Sunlu"];
   const TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PLA Silk", "PETG", "ABS", "ASA", "TPU", "PLA-CF", "PETG-CF", "PA-CF", "PC", "Nylon"];
+  // names for the colour the CFS reads off a spool (it gives only the colour): the nearest wins
+  const COLOURS = [
+    ["Black", "Svart", "#000000"], ["White", "Hvit", "#ffffff"], ["Grey", "Grå", "#808080"], ["Dark grey", "Mørkegrå", "#404040"],
+    ["Silver", "Sølv", "#c0c0c0"], ["Red", "Rød", "#d32020"], ["Dark red", "Mørkerød", "#8b0000"], ["Orange", "Oransje", "#f07818"],
+    ["Yellow", "Gul", "#f2d000"], ["Gold", "Gull", "#c9a227"], ["Lime", "Lime", "#9acd32"], ["Green", "Grønn", "#2e9e44"],
+    ["Dark green", "Mørkegrønn", "#1e5a2a"], ["Teal", "Blågrønn", "#2f7f80"], ["Cyan", "Cyan", "#00bcd4"], ["Sky blue", "Himmelblå", "#00a0f0"],
+    ["Blue", "Blå", "#1e5bd8"], ["Navy", "Marineblå", "#1a2a6c"], ["Purple", "Lilla", "#7b2d9b"], ["Magenta", "Magenta", "#c0158a"],
+    ["Pink", "Rosa", "#ff69b4"], ["Brown", "Brun", "#7b4a2a"], ["Beige", "Beige", "#e8d8b0"],
+  ];
 
   /** "/mnt/UDISK/printer_data/gcodes/GTA 6 stand - Warden of Bacon_PLA_9h1m52s.gcode" -> "GTA 6 stand - Warden of Bacon" */
   function printName(path) {
@@ -203,6 +212,19 @@
     const t = String(v == null ? "" : v).trim().toUpperCase();
     const m = /^F?\s*0*(\d{1,6})$/.exec(t);
     return m ? `F${m[1].padStart(3, "0")}` : t;
+  }
+  /** a colour's nearest name, in the page's language: "#2f6f7a" -> "Teal" */
+  function colourName(hex, lang) {
+    const c = colour(hex);
+    if (!c) return "";
+    const rgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+    const [r, g, b] = rgb(c);
+    let best = "", far = Infinity;
+    for (const [en, nb, h] of COLOURS) {
+      const [r2, g2, b2] = rgb(h), d = (r - r2) ** 2 + (g - g2) ** 2 + (b - b2) ** 2;
+      if (d < far) { far = d; best = lang === "nb" ? nb : en; }
+    }
+    return best;
   }
   const markSvg = (cls) => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="${MARK}"></path></svg>`;
 
@@ -357,6 +379,9 @@
     .pick { font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 6px; border-radius: 999px;
             border: 1px solid var(--divider-color); cursor: pointer; background: none; color: var(--primary-text-color); }
     .pick .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
+    .pick[aria-pressed="true"] { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); }
+    .fromcfs { margin-bottom: 12px; }
+    .fromcfs .fromhead { font-size: 13px; color: var(--secondary-text-color); margin-bottom: 6px; }
     .linkbtn { font: inherit; font-size: 14px; justify-self: start; text-align: left; padding: 4px 0; border: none; background: none;
                color: var(--primary-color); cursor: pointer; }
     .dmsg { font-size: 13px; color: var(--error-color, #db4437); margin: -4px 0 12px; }
@@ -508,6 +533,7 @@
           </dialog>
           <dialog class="spoolform" aria-labelledby="sf-title"><form novalidate>
             <h3 id="sf-title"></h3>
+            <div class="fromcfs" hidden><div class="fromhead">${esc(s.fromCfs)}</div><div class="picks"></div></div>
             <div class="fields" data-part="edit">
               <label>${esc(s.brand)}<input name="brand" list="pp-brands" autocomplete="off"></label>
               <div class="pair"><label>${esc(s.colourName)}<input name="colour" autocomplete="off"></label>
@@ -1050,7 +1076,8 @@
         const dlg = t.closest("dialog");
         dlg.querySelector('[name="stock"]').value = t.dataset.stock;
         dlg.querySelector("[data-go]").focus();
-      } else if (what === "clear") this._confirmSlot(true);
+      } else if (what === "cfs") this._fromSlot(t.dataset.slot);
+      else if (what === "clear") this._confirmSlot(true);
       else if (what === "forget") this._forget();
       else if (what === "new") this._newFromSlot();
       else if (what === "remove") this._ask("remove");
@@ -1126,25 +1153,58 @@
 
     /* a spool in a slot that is not in the register yet: checked in with what the CFS says, then confirmed in the slot */
     _newFromSlot() {
-      const label = this._slotOpen, info = this._slotInfo(label), a = info.attrs;
       this.shadowRoot.querySelector("dialog.slotform").close();
-      const creality = /creality/i.test(a.vendor || "");
-      // Creality's product with its type: "Hyper PLA", "Hyper Stardust PLA"
-      const product = creality && a.name ? (String(a.name).toUpperCase().includes(String(a.type || "").toUpperCase()) ? a.name : `${a.name} ${a.type || ""}`.trim()) : a.type;
-      this._forSlot = label;
-      this._openSpool(null, { brand: creality ? "Creality" : "", type: product || "", hex: info.hex });
+      this._openSpool(null, this._slotOpen);
     }
 
-    /* checking a spool in (prefill: what the CFS says), or changing one */
-    _openSpool(stock, prefill) {
+    /** the CFS's slots holding a spool with no stock number on it yet */
+    _unregistered() {
+      const slots = (this._reg && this._reg.slots) || {};
+      return [...(this._cfg.boxes || []).flatMap((b) => b.slots), ...(this._cfg.external ? [this._cfg.external] : [])]
+        .map((x) => ({ label: x.label, info: this._slotRead(x) }))
+        .filter(({ label, info }) => !info.empty && !(slots[label] && slots[label].stock));
+    }
+
+    /** the spool in a slot as the CFS says it: brand (its vendor, unless Generic), colour and its name, and type
+     *  (Creality's product with its type: "Hyper PLA", "Hyper Stardust PLA") */
+    _fromCfs(label) {
+      const info = this._slotInfo(label), a = info.attrs;
+      const vendor = String(a.vendor || "").trim(), type = String(a.type || "").trim(), name = String(a.name || "").trim();
+      const creality = /creality/i.test(vendor);
+      const product = creality && name ? (name.toUpperCase().includes(type.toUpperCase()) ? name : `${name} ${type}`.trim()) : type;
+      return { brand: /^generic$/i.test(vendor) ? "" : vendor, colour: colourName(info.hex, this._lang), hex: info.hex, type: product };
+    }
+
+    /* checking in: the spool in a slot filled in from the CFS, and once checked in, confirmed in that slot; picked
+       again, it is let go (what was filled in stays) */
+    _fromSlot(label) {
+      const dlg = this.shadowRoot.querySelector("dialog.spoolform"), field = (n) => dlg.querySelector("form").elements.namedItem(n);
+      const again = this._forSlot === label;
+      this._forSlot = again ? null : label;
+      dlg.querySelectorAll('[data-fil="cfs"]').forEach((b) => b.setAttribute("aria-pressed", String(!again && b.dataset.slot === label)));
+      if (again) return;
+      const v = this._fromCfs(label);
+      field("brand").value = v.brand;
+      field("colour").value = v.colour;
+      field("hex").value = v.hex || "#808080";
+      field("material").value = v.type;
+      field(v.brand ? "weight" : "brand").focus();
+    }
+
+    /* checking a spool in (from a slot: what the CFS says filled in), or changing one */
+    _openSpool(stock, fromSlot) {
       const s = this._s, dlg = this.shadowRoot.querySelector("dialog.spoolform");
       if (!dlg || !dlg.showModal) return;
       const spool = stock ? this._spool(stock) : null;
       if (stock && !spool) return;
       this._editing = spool ? spool.stock : null;
       this._spoolDone = false;
-      if (!prefill) this._forSlot = null;
-      const v = spool || prefill || {}, field = (n) => dlg.querySelector("form").elements.namedItem(n);
+      this._forSlot = null;
+      const from = dlg.querySelector(".fromcfs"), slots = spool ? [] : this._unregistered();
+      from.hidden = !slots.length;
+      from.querySelector(".picks").innerHTML = slots.map(({ label, info }) => `<button type="button" class="pick" data-fil="cfs" data-slot="${esc(label)}" aria-pressed="false">
+        <span class="dot" style="background:${info.hex || "transparent"}"></span>${esc(`${this._slotName(label)} ${info.filament || s.notSetShort}`)}</button>`).join("");
+      const v = spool || {}, field = (n) => dlg.querySelector("form").elements.namedItem(n);
       field("brand").value = v.brand || "";
       field("colour").value = v.colour || "";
       field("hex").value = colour(v.hex) || "#808080";
@@ -1160,7 +1220,7 @@
       dlg.querySelector("h3").textContent = spool ? s.editTitle(spool.stock) : s.checkInTitle;
       this._say(dlg, "");
       dlg.showModal();
-      field(prefill && prefill.brand ? "colour" : "brand").focus();
+      if (fromSlot) this._fromSlot(fromSlot); else field("brand").focus();
     }
 
     async _saveSpool() {
@@ -1384,5 +1444,5 @@
   });
 
   // for the tests
-  window.__printerPanel = { printName, duration, colour, slotLabel, stockNo, repairSidebarIcons };
+  window.__printerPanel = { printName, duration, colour, colourName, slotLabel, stockNo, repairSidebarIcons };
 })();
