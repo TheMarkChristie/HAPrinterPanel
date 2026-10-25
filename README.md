@@ -4,7 +4,8 @@ A **Printer** page in Home Assistant's sidebar for a Creality printer, with Crea
 live camera, the name of the print, its progress, the time left and when it will be done, the nozzle, bed and chamber
 temperatures, and the colours loaded in the CFS. It can pause, resume and stop the print, pause it when it reaches a
 G-code line, switch its light, set the temperature targets, the speed and the fans, and tell your
-phone when a print finishes, pauses, runs out of filament or stops with an error.
+phone when a print finishes, pauses, runs out of filament or stops with an error. And it keeps a filament register: the
+spools you have, each with a stock number, with what every print used taken off the spool it came from.
 
 It is built on the [Creality integration](https://github.com/3dg1luk43/ha_creality_ws) (`ha_creality_ws`), which
 talks to the printer; Printer Panel adds the page, the notifications, and two controls of its own that go through the
@@ -19,8 +20,9 @@ integration supports show whatever they report (no CFS, no CFS card; no chamber,
 | Pause at line | While printing, with Count G-code lines on: the line the printer is at ("Line 341,202 of 495,870"), and a box to pause the print when it reaches a line, with how long until it does |
 | Light | The printer's light, on or off |
 | Temperatures | Nozzle, bed and chamber now, with their targets: type one, or step it by 5 °C |
-| CFS | Every slot's colour, material and how much is left (low at 10 % or less), the slot in use, each box's temperature and humidity, the external spool, and the colours in the print file |
+| CFS | Every slot's colour, material and how much is left (low at 10 % or less), the slot in use, each box's temperature and humidity, the external spool, the colours in the print file, and the stock number of the spool in each slot |
 | Speed and fans | The print speed, stepped by 10 % or one of Silent, Standard, Sport and Ludicrous; part cooling, side and case fans, each a slider and a switch |
+| Filament | The spools checked in, with what each has left, and the slots still waiting for a stock number |
 
 The page is drawn once and then only its values change, so the camera keeps playing. It follows the theme and speaks
 English or Norwegian bokmål after the user's language. On a phone the cards stack in one column.
@@ -77,6 +79,32 @@ These are entities of Printer Panel's own on the printer's device, so automation
   past the end of the file, or nothing printing is refused with the reason. The line is kept through a restart of Home
   Assistant; the print ending, or another print starting, drops it.
 
+## The filament register
+
+**Check in** a spool on the Filament card with its brand, colour (a name and a swatch), type and the weight on its
+label. It gets the next stock number, F001, F002 and on (a number is never given out twice), and the page says to write
+it on the spool.
+
+The CFS says what is in each slot, and the register follows it:
+
+- **A Creality spool** has a chip the CFS reads. When exactly one spool in the register is a Creality spool of that type
+  and colour, not in another slot and not used up, it is matched to the slot on its own (Found by the CFS).
+- **Any other spool**, or two Creality spools alike, waits for its stock number: press **Confirm** on the slot, before
+  the print or after it, and type the number written on the spool (`2`, `f2` and `F002` are all F002). The likeliest
+  spools (the slot's type, nearest its colour) are offered to pick from. A spool on the slot not checked in yet can be
+  checked in from there, with what the CFS says filled in.
+
+While a print runs, the printer's own count of the filament it has used goes to the slot printing at that moment. When
+the print ends (finished or stopped), each slot's length comes off its spool in grams (1.75 mm filament at the type's
+density, so about 3 g a metre of PLA). A slot without a stock number keeps its grams waiting, shown on the Filament card,
+until the number is confirmed; if that spool has since left the slot, the grams still go to the number given, without
+putting it back in the slot. Taking a spool out of a slot clears the slot; the printer being off does not.
+
+Change a spool (or its grams left, after weighing it) with its pencil; **Remove** takes it out of the register. The
+register is kept in Home Assistant's storage, a print under way when Home Assistant restarts is taken up where it was,
+and deleting the printer's entry deletes its register. Printer Panel reads all of this from the Creality integration's
+entities: it asks the printer nothing for it.
+
 ## How it finds the printer's entities
 
 By their keys in the Creality integration, not their names: renaming an entity (or the device) keeps the page and the
@@ -109,9 +137,10 @@ notifications working. A disabled entity is left off the page. The page asks the
 ## Development
 
 `python -m pytest tests -q` runs the tests of the printer model (entities, the print's name, durations, events, the
-notification texts, a G-code file's lines); `python -m pytest -c tests_ha/pytest.ini tests_ha -q` sets a printer up in a
-real Home Assistant and checks the sidebar item, what the page is told, the notifications, a renamed entity, the
-options, counting and Pause at line against a stand-in Moonraker (needs `pytest-homeassistant-custom-component`; on
+notification texts, a G-code file's lines) and of the filament register's rules; `python -m pytest -c tests_ha/pytest.ini
+tests_ha -q` sets a printer up in a real Home Assistant and checks the sidebar item, what the page is told, the
+notifications, a renamed entity, the options, counting and Pause at line against a stand-in Moonraker, and the filament
+register through a print, a restart and the printer off (needs `pytest-homeassistant-custom-component`; on
 Windows also stand-ins for `fcntl` and `resource` on the path); `python tests/render_panel.py` draws the page in
 headless Chrome from the K2 Plus fixture, presses every control and screenshots it wide and on a phone;
 `python tests/render_icons.py` checks the sidebar icon repair against Home Assistant's own icon element;

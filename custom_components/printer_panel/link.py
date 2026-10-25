@@ -1,6 +1,7 @@
 """One printer in Home Assistant: its entities (found again whenever the entity registry changes, so a rename is
 followed), what the Printer page is told about it, the phone notifications when a print finishes, pauses, runs out of
-filament or stops with an error, and the way to its Moonraker (for counting lines and the pause at one)."""
+filament or stops with an error, the way to its Moonraker (for counting lines and the pause at one), and its filament
+register."""
 from __future__ import annotations
 
 import logging
@@ -18,6 +19,7 @@ from .const import (CONF_DEVICE, CONF_EVENTS, CONF_NOTIFY, CONF_TITLE, COUNT_SUF
 from .linepause import LinePause
 from .moonraker import Moonraker, MoonrakerError
 from .printer import filament_event, message, print_event, print_name, resolve
+from .register import FilamentRegister
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +35,7 @@ class PrinterLink:
         self._unwatch: CALLBACK_TYPE | None = None
         self._missing_targets: set[str] = set()
         self.line_pause = LinePause(self)
+        self.filament = FilamentRegister(self)
 
     @property
     def device_id(self) -> str:
@@ -87,11 +90,13 @@ class PrinterLink:
     def async_start(self) -> CALLBACK_TYPE:
         """Follow the printer's status and filament for notifications, and its entities for renames. Returns the stop."""
         self._watch()
+        stop_filament = self.filament.start()
         stop_registry = self.hass.bus.async_listen(er.EVENT_ENTITY_REGISTRY_UPDATED, self._registry_changed)
 
         @callback
         def stop() -> None:
             stop_registry()
+            stop_filament()
             self.line_pause.stop()
             if self._unwatch:
                 self._unwatch()
@@ -105,6 +110,7 @@ class PrinterLink:
         if fresh != self.map:
             self.map = fresh
             self._watch()
+            self.filament.restart()
 
     @callback
     def _watch(self) -> None:

@@ -42,9 +42,36 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const calls = [];
 let states = JSON.parse(JSON.stringify(STATES));
 window.POS = { available: true, target: null, state: "printing", line: 341202, lines: 495870, eta: null };
+// the filament register as Home Assistant sends it: a Creality spool the CFS found in 1D, two not in the CFS (one nearly
+// used up), grams from the last print waiting on 1A, and this print so far in 1B (no number yet) and 1D
+const day = "2026-10-25";
+window.FIL = {
+  spools: [
+    { stock: "F001", brand: "Creality", colour: "Purple", hex: "#9e007e", type: "Hyper PLA", weight: 1000, left: 812.4, checked_in: day, slot: "1D" },
+    { stock: "F002", brand: "Sunlu", colour: "Black", hex: "#000000", type: "PLA", weight: 1000, left: 1000, checked_in: day, slot: null },
+    { stock: "F003", brand: "eSun", colour: "Pink", hex: "#ff37af", type: "PLA+", weight: 1000, left: 64, checked_in: day, slot: null },
+  ],
+  slots: { "1D": { stock: "F001", how: "auto" } }, pending: { "1A": 15.2 }, printing: { "1B": 4.1, "1D": 2 },
+};
+const filament = (m) => {
+  calls.push(`ws ${JSON.stringify(m)}`);
+  if (window.WS_REFUSE) throw window.WS_REFUSE;
+  if (m.type.endsWith("/check_in")) return { stock: "F004", brand: m.brand, colour: m.colour, hex: m.hex, type: m.material, weight: m.weight, left: m.weight, slot: null };
+  if (m.type.endsWith("/confirm")) return { booked: 15.2 };
+  if (m.type.endsWith("/update")) return { ...window.FIL.spools.find((x) => x.stock === m.stock), ...m };
+  return null;
+};
+const connection = { subscribeMessage: async (cb, m) => {
+  window.SUBS = (window.SUBS || 0) + 1;
+  if (window.SUB_FAIL) throw { code: "unknown_command", message: "Unknown command." };
+  window.FIL_CB = cb;
+  setTimeout(() => cb(JSON.parse(JSON.stringify(window.FIL))), 0);
+  return () => { window.UNSUBBED = (window.UNSUBBED || 0) + 1; };
+} };
 const mk = (lang) => ({ states, locale: { language: lang, time_format: "24", time_zone: "local" }, config: { time_zone: "Europe/Oslo" },
-  language: lang, hassUrl: (u) => u,
+  language: lang, hassUrl: (u) => u, connection,
   callWS: async (m) => { if (m.type === "printer_panel/position") window.POS_ASKED = (window.POS_ASKED || 0) + 1;
+    if (m.type.startsWith("printer_panel/filament/")) return filament(m);
     return m.type === "printer_panel/config" ? CONFIG : m.type === "printer_panel/position" ? JSON.parse(JSON.stringify(window.POS)) : null; },
   callService: async (d, s, data) => { calls.push(`${d}.${s} ${JSON.stringify(data)}`); if (window.REFUSE) throw new Error(window.REFUSE); } });
 const set = (id, state) => { states = JSON.parse(JSON.stringify(states)); states[id] = { ...states[id], state }; panel.hass = mk("en"); };
@@ -139,12 +166,81 @@ const pictures = async () => {
     out(`active slot ${v} -> ${[...r.querySelectorAll(".slot.active")].map((row) => row.dataset.slot).join(",") || "none"}`);
   }
   out(`print file colours: "${txt(".uses")}" ${r.querySelectorAll(".uses .dot").length} dots`);
+  // the filament register: the card, the slots' stock numbers, and each dialog
+  calls.length = 0;
+  const slotDlg = q("dialog.slotform"), spoolDlg = q("dialog.spoolform");
+  const sf = (n, v) => { spoolDlg.querySelector(`[name="${n}"]`).value = v; };
+  const fields = (names) => names.map((n) => spoolDlg.querySelector(`[name="${n}"]`).value).join(", ");
+  const picks = () => [...slotDlg.querySelectorAll(".pick")].map((b) => b.textContent.trim()).join(", ");
+  out(`filament: card shown ${vis(".filament")} | subscribed ${window.SUBS} | waiting: ${[...r.querySelectorAll(".waiting span")].map((e) => `"${e.textContent}"`).join(" ")}`);
+  out(`spools: ${[...r.querySelectorAll(".spool")].map((e) => `${e.querySelector(".who").textContent.replace(/\s+/g, " ").trim()} [${e.querySelector(".grams").textContent.trim()}]${e.classList.contains("low") ? " LOW" : ""}`).join(" | ")}`);
+  const stockButtons = () => [...r.querySelectorAll(".slot")].map((e) => { const b = e.querySelector(".stock");
+    return `${e.dataset.slot} ${b.hidden ? "-" : b.textContent}${b.classList.contains("due") ? " DUE" : ""}${b.classList.contains("unknown") ? " (dashed)" : ""}`; }).join(" | ");
+  out(`slot stock numbers: ${stockButtons()} | 1D says "${r.querySelector('.slot[data-slot="1D"] .stock').title}"`);
+  r.querySelector('.slot[data-slot="1D"] .stock').click(); await wait(20);
+  out(`1D: open ${slotDlg.open} "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | number "${slotDlg.querySelector('[name="stock"]').value}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | likely: ${picks()}`);
+  slotDlg.querySelector('[name="stock"]').value = "2"; slotDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`typed 2 -> ${calls.pop()} | open ${slotDlg.open}`);
+  r.querySelector('.waiting [data-for="1A"]').click(); await wait(20);
+  out(`1A from its note: "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | likely: ${picks()}`);
+  slotDlg.querySelector('[name="stock"]').value = "f099"; slotDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`f099: "${txt("dialog.slotform .dmsg")}" | asked ${calls.length} | open ${slotDlg.open}`);
+  slotDlg.querySelector(".pick").click(); await wait(10);
+  out(`picked "${slotDlg.querySelector('[name="stock"]').value}", focus on ${slotDlg.querySelector(":focus") ? slotDlg.querySelector(":focus").textContent.trim() : "-"}`);
+  slotDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`-> ${calls.pop()} | open ${slotDlg.open}`);
+  q('[data-fil="checkin"]').click(); await wait(20);
+  out(`check in: open ${spoolDlg.open} "${txt("dialog.spoolform h3")}" | weight ${spoolDlg.querySelector('[name="weight"]').value} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
+  spoolDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`nothing filled in: "${txt("dialog.spoolform .dmsg")}" | asked ${calls.length}`);
+  sf("brand", "Polymaker"); sf("colour", "Grey"); sf("hex", "#7a7a7a"); sf("material", "PETG"); sf("weight", "0");
+  spoolDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`weight 0: "${txt("dialog.spoolform .dmsg")}" | asked ${calls.length}`);
+  sf("weight", "750"); spoolDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`-> ${calls.pop()}`);
+  out(`checked in: "${txt("dialog.spoolform .done p")}" ${txt(".bignum")} "${txt(".donehint")}" | fields shown ${vis('dialog.spoolform [data-part="edit"]')} | cancel shown ${vis('dialog.spoolform [data-fil="close"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
+  spoolDlg.querySelector("[data-go]").click(); await wait(20);
+  out(`Done: open ${spoolDlg.open} | asked ${calls.length}`);
+  r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
+  out(`change F003: "${txt("dialog.spoolform h3")}" | ${fields(["brand", "colour", "hex", "material", "weight", "left"])} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
+  sf("left", "50"); spoolDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`weighed, 50 left -> ${calls.pop()} | open ${spoolDlg.open}`);
+  r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
+  spoolDlg.querySelector('[data-fil="remove"]').click(); await wait(20);
+  out(`remove asks first: "${txt("dialog.confirm h3")}" / "${txt('[data-dlg="go"]')}" | asked ${calls.length}`);
+  q('[data-dlg="go"]').click(); await wait(30);
+  out(`removed -> ${calls.pop()} | spool form open ${spoolDlg.open} | question open ${q("dialog.confirm").open}`);
+  r.querySelector('.slot[data-slot="1C"] .stock').click(); await wait(20);
+  out(`1C: "${txt(".slothint")}" | likely: ${picks()}`);
+  slotDlg.querySelector('[data-fil="new"]').click(); await wait(20);
+  out(`a new spool in 1C: slot dialog open ${slotDlg.open} | "${txt("dialog.spoolform h3")}" | ${fields(["brand", "hex", "material", "weight"])}`);
+  sf("brand", "Sunlu"); sf("colour", "Blue"); spoolDlg.querySelector("[data-go]").click(); await wait(40);
+  out(`-> ${calls.slice(-2).join(" then ")} | "${txt(".donehint")}"`);
+  spoolDlg.close(); calls.length = 0;
+  r.querySelector('.slot[data-slot="Ext"] .stock').click(); await wait(20);
+  out(`Ext: "${txt("dialog.slotform h3")}" | "${txt(".slothint")}"`);
+  slotDlg.querySelector('[data-fil="new"]').click(); await wait(20);
+  out(`a new Creality spool on the holder: ${fields(["brand", "hex", "material"])}`);
+  window.WS_REFUSE = { code: "home_assistant_error", message: "Storage is read-only" };
+  sf("colour", "Red"); spoolDlg.querySelector("[data-go]").click(); await wait(30);
+  out(`refused: "${txt("dialog.spoolform .dmsg")}" | open ${spoolDlg.open} | button enabled ${!spoolDlg.querySelector("[data-go]").disabled}`);
+  window.WS_REFUSE = null; spoolDlg.close(); calls.length = 0;
+  window.FIL_CB({ ...JSON.parse(JSON.stringify(window.FIL)), slots: { "1A": { stock: "F002", how: "confirmed" }, "1D": { stock: "F001", how: "auto" } }, pending: {}, printing: {} }); await wait(20);
+  out(`1A confirmed: waiting ${r.querySelectorAll(".waiting").length} | ${stockButtons()} | F002 "${txt('.spool[data-stock="F002"] small')}"`);
+  window.FIL_CB({ spools: [], slots: {}, pending: {}, printing: {} }); await wait(20);
+  out(`no spools: "${txt(".spools")}"`);
+  panel._unsubscribe(); window.SUB_FAIL = true; panel._reg = null; panel._subscribe(); await wait(30);
+  out(`a Printer Panel without the register: card shown ${vis(".filament")} | stock buttons shown ${[...r.querySelectorAll(".slot .stock")].filter((b) => !b.hidden).length} | unsubscribed ${window.UNSUBBED || 0}`);
+  window.SUB_FAIL = false; panel._subscribe(); await wait(30);
+  out(`and back: card shown ${vis(".filament")} | subscribed ${window.SUBS}`);
   // Norwegian
   window.POS = { ...window.POS, target: 400000, eta: 725 };
   states[PAUSE_AT_ID] = { ...states[PAUSE_AT_ID], state: "400000" };
   states[COUNT_ID] = { ...states[COUNT_ID], state: "on" };
   panel.hass = mk("nb"); await panel._refreshPos(); await wait(30);
+  window.FIL_CB(JSON.parse(JSON.stringify(window.FIL))); await wait(20);
   out(`nb: ${txt(".bar .status")} | ${txt(".times").replace(/\s+/g, " ")} | ${txt('[data-act="pause"]')} | "${txt(".linepos")}" | "${txt(".linestate")}"`);
+  out(`nb filament: ${[...r.querySelectorAll(".waiting span")].map((e) => `"${e.textContent}"`).join(" ")} | ${txt('.spool[data-stock="F001"] .grams')} | 1C "${txt('.slot[data-slot="1C"] .stock')}"`);
   // idle
   const status = Object.keys(states).find((k) => k.endsWith("_print_status"));
   states = JSON.parse(JSON.stringify(STATES)); states[status] = { ...states[status], state: "idle" }; panel.hass = mk("en"); await wait(30);
@@ -201,4 +297,4 @@ def run(width: int, height: int, name: str, checks: bool) -> None:
 
 if __name__ == "__main__":
     run(1280, 1460, "wide", True)
-    run(400, 2280, "phone", False)
+    run(400, 2900, "phone", False)

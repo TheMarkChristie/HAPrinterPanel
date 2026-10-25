@@ -2,7 +2,8 @@
  * Printer Panel: the Printer page in Home Assistant's sidebar, and the same view as a card (custom:printer-panel-card),
  * for a Creality printer set up with the Creality integration (ha_creality_ws): the live camera, the print's name,
  * progress, time left and finish time, the temperatures with their targets, the CFS's colours, speed and fans, the light,
- * and Pause, Resume and Stop (Stop asks first).
+ * and Pause, Resume and Stop (Stop asks first). And the filament register: the spools checked in (brand, colour, type,
+ * weight), what each has left after the prints that used it, and each CFS slot's spool by the stock number written on it.
  *
  * The integration (printer_panel) tells the page which entity is which (printer_panel/config), found by their keys, so a
  * renamed entity is still found. The page is drawn once and then only its values change, so the camera keeps playing.
@@ -79,7 +80,27 @@
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
       failed: (what, why) => `Could not ${what}: ${why}`,
-      verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause" },
+      verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause", checkIn: "check it in",
+               save: "save it", remove: "remove it", confirm: "confirm it" },
+      filament: "Filament", checkIn: "Check in", checkInTitle: "Check in a spool", editTitle: (n) => `Spool ${n}`,
+      brand: "Brand", colourName: "Colour", colourPick: "Colour of the swatch", type: "Type", weight: "Weight on the label (g)",
+      leftG: "Left (g)", save: "Save", remove: "Remove", done: "Done",
+      checkedIn: "Checked in as", writeIt: (n) => `Write ${n} on the spool.`, isIn: (where) => `It is ${where}.`,
+      removeAsk: (n) => `Remove ${n} from the register?`, removeHint: "Its stock number is not given to another spool.",
+      noSpools: "No spools checked in yet. Check one in with its brand, colour, type and the weight on its label.",
+      inSlot: (l) => `in ${l}`, onExt: "on the external holder", gLeft: (g) => `${g} g left`, ofG: (g) => `of ${g} g`,
+      thisPrint: (g) => `${g} g this print`, editSpool: (n) => `Change ${n}`,
+      waits: (where, g) => `${where}: ${g} g used, waiting for the spool's stock number`,
+      waitsNow: (where, g) => `${where}: ${g} g so far this print, no stock number yet`,
+      extName: "External", unknownSlot: "Slot not known",
+      confirm: "Confirm", slotTitle: (l) => `Which spool is in ${l}?`, extTitle: "Which spool is on the external holder?",
+      unknownTitle: "Which spool was printing?", slotHint: "The stock number written on the spool.",
+      slotWaits: (g) => `The last print used ${g} g from it: that comes off the spool you give.`, cfsSays: (t) => `The CFS says: ${t}.`,
+      stockNo: "Stock number", newSpool: "A spool not checked in yet: check it in", clear: "Clear",
+      auto: "Found by the CFS", confirmed: "Confirmed", stockBtn: (where, n) => (n ? `${where}: ${n}` : `${where}: confirm the stock number`),
+      noSuch: (n) => `There is no ${n} in the register.`, needStock: "Type the stock number on the spool.",
+      need: (what) => `Fill in the ${what.toLowerCase()}.`, weightRange: "The weight should be from 1 to 10,000 g.",
+      leftRange: "What is left should be from 0 to 10,000 g.",
       notSetUp: "No printer is set up in Printer Panel yet. Add it under Settings, Devices & services.",
       cantLoad: "The printer's details could not be read; trying again.",
     },
@@ -107,7 +128,27 @@
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
       fanModel: "Delkjøling", fanSide: "Sidevifte", fanCase: "Kabinettvifte", fanOn: (w) => `${w} av eller på`, fanLevel: (w) => `Fart for ${w.toLowerCase()}`,
       failed: (what, why) => `Kunne ikke ${what}: ${why}`,
-      verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen" },
+      verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen",
+               checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den" },
+      filament: "Filament", checkIn: "Sjekk inn", checkInTitle: "Sjekk inn en spole", editTitle: (n) => `Spole ${n}`,
+      brand: "Merke", colourName: "Farge", colourPick: "Fargen på prøven", type: "Type", weight: "Vekt på etiketten (g)",
+      leftG: "Igjen (g)", save: "Lagre", remove: "Fjern", done: "Ferdig",
+      checkedIn: "Sjekket inn som", writeIt: (n) => `Skriv ${n} på spolen.`, isIn: (where) => `Den er ${where}.`,
+      removeAsk: (n) => `Fjerne ${n} fra registeret?`, removeHint: "Lagernummeret gis ikke til en annen spole.",
+      noSpools: "Ingen spoler er sjekket inn ennå. Sjekk inn en med merke, farge, type og vekten på etiketten.",
+      inSlot: (l) => `i ${l}`, onExt: "på den eksterne holderen", gLeft: (g) => `${g} g igjen`, ofG: (g) => `av ${g} g`,
+      thisPrint: (g) => `${g} g denne utskriften`, editSpool: (n) => `Endre ${n}`,
+      waits: (where, g) => `${where}: ${g} g brukt, venter på spolens lagernummer`,
+      waitsNow: (where, g) => `${where}: ${g} g så langt i denne utskriften, ikke noe lagernummer ennå`,
+      extName: "Ekstern", unknownSlot: "Ukjent plass",
+      confirm: "Bekreft", slotTitle: (l) => `Hvilken spole er i ${l}?`, extTitle: "Hvilken spole er på den eksterne holderen?",
+      unknownTitle: "Hvilken spole skrev ut?", slotHint: "Lagernummeret som står på spolen.",
+      slotWaits: (g) => `Siste utskrift brukte ${g} g herfra: det trekkes fra spolen du oppgir.`, cfsSays: (t) => `CFS-en sier: ${t}.`,
+      stockNo: "Lagernummer", newSpool: "En spole som ikke er sjekket inn: sjekk den inn", clear: "Nullstill",
+      auto: "Funnet av CFS-en", confirmed: "Bekreftet", stockBtn: (where, n) => (n ? `${where}: ${n}` : `${where}: bekreft lagernummeret`),
+      noSuch: (n) => `${n} finnes ikke i registeret.`, needStock: "Skriv inn lagernummeret på spolen.",
+      need: (what) => `Fyll inn ${what.toLowerCase()}.`, weightRange: "Vekten skal være fra 1 til 10 000 g.",
+      leftRange: "Det som er igjen skal være fra 0 til 10 000 g.",
       notSetUp: "Ingen skriver er satt opp i Printer Panel ennå. Legg den til under Innstillinger, Enheter og tjenester.",
       cantLoad: "Kunne ikke lese skriverens detaljer; prøver igjen.",
     },
@@ -116,6 +157,9 @@
   const SLICER_SUFFIX = /(?:_[A-Z][A-Z0-9+-]*)+_(?:\d+d)?(?:\d+h)?\d+m(?:\d+s)?$/;
   const GCODE_EXT = /\.(?:gcode|gco|g|bgcode)$/i;
   const ACTIVE = ["printing", "processing", "paused", "self-testing"];
+  const UNKNOWN_SLOT = "?";        // the register's name for grams printed while the printer did not say which slot
+  const BRANDS = ["Creality", "Bambu Lab", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture", "Polymaker", "Prusament", "Sunlu"];
+  const TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PLA Silk", "PETG", "ABS", "ASA", "TPU", "PLA-CF", "PETG-CF", "PA-CF", "PC", "Nylon"];
 
   /** "/mnt/UDISK/printer_data/gcodes/GTA 6 stand - Warden of Bacon_PLA_9h1m52s.gcode" -> "GTA 6 stand - Warden of Bacon" */
   function printName(path) {
@@ -147,6 +191,12 @@
   const num = (v) => { if (v === null || v === undefined || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
   /** "#ff37af", "#F3BBCAFF" (with alpha) or "ff37af" -> "#ff37af"; anything else -> null */
   const colour = (v) => { const m = /^#?([0-9a-f]{6})(?:[0-9a-f]{2})?$/i.exec(String(v == null ? "" : v).trim()); return m ? `#${m[1].toLowerCase()}` : null; };
+  /** what is written on a spool -> its stock number: "f2", "2" and "F002" -> "F002"; anything else as typed, in capitals */
+  function stockNo(v) {
+    const t = String(v == null ? "" : v).trim().toUpperCase();
+    const m = /^F?\s*0*(\d{1,6})$/.exec(t);
+    return m ? `F${m[1].padStart(3, "0")}` : t;
+  }
   const markSvg = (cls) => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path fill-rule="evenodd" d="${MARK}"></path></svg>`;
 
   const STYLE = `
@@ -162,8 +212,11 @@
     .grid { display: grid; gap: 16px; padding: 16px; grid-template-columns: minmax(0, 1.5fr) minmax(300px, 1fr); align-items: start;
             max-width: 1500px; margin: 0 auto; box-sizing: border-box; }
     :host(.card) .grid { padding: 0; }
-    @container (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } :host(.card) .grid { padding: 0; } }
     .col { display: grid; gap: 16px; min-width: 0; }
+    .col > * { min-width: 0; }
+    /* one column: the cards in the page's order, the Filament card (under the camera when wide) last */
+    @container (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); padding: 12px; } :host(.card) .grid { padding: 0; }
+                                    .col { display: contents; } .filament { order: 1; } }
     ha-card { display: block; padding: 16px; box-sizing: border-box; }
     h2 { font-size: 16px; font-weight: 500; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
     h2 .aside { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--secondary-text-color); }
@@ -194,7 +247,8 @@
     .btn.danger { color: var(--error-color, #db4437); border-color: var(--error-color, #db4437); background: none; }
     .btn[aria-pressed="true"] { background: color-mix(in srgb, var(--warning-color, #ffa600) 25%, transparent); border-color: var(--warning-color, #ffa600); }
     .btn:disabled { opacity: 0.45; cursor: default; }
-    .btn:focus-visible, .step:focus-visible, input:focus-visible, .mode:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+    .btn:focus-visible, .step:focus-visible, input:focus-visible, .mode:focus-visible, .stock:focus-visible, .pick:focus-visible,
+    .iconbtn:focus-visible, .linkbtn:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
     .msg { min-height: 0; margin-top: 8px; font-size: 13px; color: var(--error-color, #db4437); }
     .msg:empty { display: none; }
     .btn.small { min-height: 36px; padding: 0 12px; }
@@ -237,8 +291,13 @@
               background: var(--secondary-background-color); color: var(--secondary-text-color); cursor: pointer; }
     .switch[aria-pressed="true"] { background: var(--primary-color); border-color: var(--primary-color); color: var(--text-primary-color, #fff); }
     .slots { display: grid; gap: 8px; }
-    .slot { display: grid; grid-template-columns: 36px 2.4em minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 6px 8px;
+    .slot { display: grid; grid-template-columns: 36px 2.4em minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 6px 8px;
             border-radius: 10px; }
+    .stock { font: inherit; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 56px; height: 32px; padding: 0 8px;
+             border-radius: 8px; border: 1px solid var(--divider-color); background: var(--secondary-background-color);
+             color: var(--primary-text-color); cursor: pointer; white-space: nowrap; }
+    .stock.unknown { font-weight: 500; color: var(--secondary-text-color); border-style: dashed; background: none; }
+    .stock.due { color: var(--warning-color, #ffa600); border: 1px solid var(--warning-color, #ffa600); }
     .slot.active { background: color-mix(in srgb, var(--primary-color) 12%, transparent); }
     .swatch { width: 32px; height: 32px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
     .slot .lbl { font-weight: 600; font-variant-numeric: tabular-nums; }
@@ -256,6 +315,47 @@
     .uses { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; color: var(--secondary-text-color); font-size: 13px; }
     .uses .dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
     .note { color: var(--secondary-text-color); padding: 24px 16px; }
+    .waitlist { display: grid; gap: 8px; }
+    .waitlist:not(:empty) { margin-bottom: 8px; }
+    .waiting { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: 14px;
+               background: color-mix(in srgb, var(--warning-color, #ffa600) 14%, transparent); }
+    .waiting span { flex: 1; min-width: 0; }
+    .spool { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 40px; align-items: center; gap: 10px; padding: 8px 0;
+             border-top: 1px solid var(--divider-color); }
+    .spool:first-child { border-top: none; }
+    .spool .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .spool .who b { font-variant-numeric: tabular-nums; margin-right: 8px; }
+    .spool small { display: block; color: var(--secondary-text-color); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+    .spool .grams { text-align: right; font-variant-numeric: tabular-nums; font-size: 14px; white-space: nowrap; }
+    .spool .mini { display: block; width: 56px; height: 4px; border-radius: 2px; background: var(--divider-color); margin: 4px 0 0 auto; overflow: hidden; }
+    .spool .mini i { display: block; height: 100%; background: var(--primary-color); }
+    .spool.low .grams { color: var(--warning-color, #ffa600); font-weight: 500; }
+    .spool.low .mini i { background: var(--warning-color, #ffa600); }
+    .iconbtn { width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--divider-color); cursor: pointer; display: grid;
+               place-items: center; background: var(--secondary-background-color); color: var(--primary-text-color); }
+    .iconbtn ha-icon { --mdc-icon-size: 20px; }
+    .none { color: var(--secondary-text-color); font-size: 14px; }
+    dialog form { margin: 0; }
+    .fields { display: grid; gap: 12px; margin-bottom: 16px; }
+    .fields label { display: grid; gap: 4px; font-size: 13px; color: var(--secondary-text-color); }
+    .fields input { font: inherit; font-size: 15px; width: 100%; height: 42px; box-sizing: border-box; padding: 0 10px; border-radius: 10px;
+                    border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
+    .fields input[type=color] { padding: 3px; cursor: pointer; }
+    .fields .pair { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 8px; align-items: end; }
+    .fields .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .picks { display: flex; flex-wrap: wrap; gap: 6px; }
+    .picks:empty { display: none; }
+    .pick { font: inherit; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px 6px 6px; border-radius: 999px;
+            border: 1px solid var(--divider-color); cursor: pointer; background: none; color: var(--primary-text-color); }
+    .pick .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
+    .linkbtn { font: inherit; font-size: 14px; justify-self: start; text-align: left; padding: 4px 0; border: none; background: none;
+               color: var(--primary-color); cursor: pointer; }
+    .dmsg { font-size: 13px; color: var(--error-color, #db4437); margin: -4px 0 12px; }
+    .dmsg:empty { display: none; }
+    .done p { margin: 0 0 4px; }
+    .done .bignum { font-size: 44px; font-weight: 600; letter-spacing: 2px; text-align: center; margin: 4px 0 12px; font-variant-numeric: tabular-nums; }
+    .done .donehint { margin-bottom: 18px; }
+    dialog [data-fil="remove"], dialog [data-fil="clear"] { margin-right: auto; }
     dialog { border: none; border-radius: 16px; padding: 20px; max-width: min(420px, 90vw); background: var(--card-background-color, #fff);
              color: var(--primary-text-color); box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4); }
     dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
@@ -347,6 +447,9 @@
           <div class="grid">
             <div class="col">
               <div class="camwrap"></div>
+              <ha-card class="filament" hidden><h2>${esc(s.filament)}<span class="aside"><button class="btn small" data-fil="checkin">
+                <ha-icon icon="mdi:plus"></ha-icon>${esc(s.checkIn)}</button></span></h2>
+                <div class="waitlist"></div><div class="spools"></div></ha-card>
             </div>
             <div class="col">
               <ha-card class="job">
@@ -392,12 +495,41 @@
             <div class="actions"><button class="btn" data-dlg="cancel" autofocus>${esc(s.cancel)}</button>
               <button class="btn danger" data-dlg="go"><ha-icon></ha-icon><span></span></button></div>
           </dialog>
+          <dialog class="spoolform" aria-labelledby="sf-title"><form novalidate>
+            <h3 id="sf-title"></h3>
+            <div class="fields" data-part="edit">
+              <label>${esc(s.brand)}<input name="brand" list="pp-brands" autocomplete="off"></label>
+              <div class="pair"><label>${esc(s.colourName)}<input name="colour" autocomplete="off"></label>
+                <input name="hex" type="color" value="#808080" aria-label="${esc(s.colourPick)}"></div>
+              <label>${esc(s.type)}<input name="material" list="pp-types" autocomplete="off"></label>
+              <div class="two"><label>${esc(s.weight)}<input name="weight" type="number" inputmode="decimal" min="1" max="10000" step="any"></label>
+                <label data-left>${esc(s.leftG)}<input name="left" type="number" inputmode="decimal" min="0" max="10000" step="any"></label></div>
+            </div>
+            <div class="done" data-part="done" hidden><p></p><div class="bignum"></div><p class="donehint"></p></div>
+            <div class="dmsg" role="alert"></div>
+            <div class="actions"><button type="button" class="btn danger" data-fil="remove">${esc(s.remove)}</button>
+              <button type="button" class="btn" data-fil="close">${esc(s.cancel)}</button>
+              <button type="submit" class="btn primary" data-go></button></div>
+          </form></dialog>
+          <dialog class="slotform" aria-labelledby="st-title"><form novalidate>
+            <h3 id="st-title"></h3><p class="slothint"></p>
+            <div class="fields"><label>${esc(s.stockNo)}<input name="stock" list="pp-stock" autocomplete="off" autocapitalize="characters"
+                spellcheck="false" placeholder="F001"></label>
+              <div class="picks"></div>
+              <button type="button" class="linkbtn" data-fil="new">${esc(s.newSpool)}</button></div>
+            <div class="dmsg" role="alert"></div>
+            <div class="actions"><button type="button" class="btn" data-fil="clear">${esc(s.clear)}</button>
+              <button type="button" class="btn" data-fil="close">${esc(s.cancel)}</button>
+              <button type="submit" class="btn primary" data-go>${esc(s.confirm)}</button></div>
+          </form></dialog>
+          <datalist id="pp-brands"></datalist><datalist id="pp-types"></datalist><datalist id="pp-stock"></datalist>
         </div>`;
       this._placeMenu();
       this._wire();
       this._camera();
       this._built = true;
       this._slotsKey = null;
+      this._subscribe();
     }
 
     _wire() {
@@ -407,6 +539,7 @@
         if (!t) return;
         if (t.dataset.act) this._act(t.dataset.act);
         else if (t.dataset.dlg) this._dialog(t.dataset.dlg);
+        else if (t.dataset.fil) this._fil(t);
         else if (t.dataset.step) this._nudgeTemp(t.closest("[data-temp]").dataset.temp, Number(t.dataset.step));
         else if (t.dataset.sstep) this._nudgeSpeed(Number(t.dataset.sstep));
         else if (t.dataset.mode) this._setNumber("speed", Number(t.dataset.mode));
@@ -430,8 +563,19 @@
         if (ev.key !== "Enter" || !ev.target.matches) return;
         if (ev.target.matches(".lineinput")) { ev.preventDefault(); this._setLine(); } else if (ev.target.matches(".stepper input")) ev.target.blur();
       });
+      root.addEventListener("submit", (ev) => {
+        ev.preventDefault();
+        const dlg = ev.target.closest("dialog");
+        if (dlg && dlg.classList.contains("spoolform")) this._saveSpool();
+        else if (dlg && dlg.classList.contains("slotform")) this._confirmSlot(false);
+      });
       const dlg = root.querySelector("dialog.confirm");
-      if (dlg) dlg.addEventListener("close", () => { const opener = root.querySelector(`[data-act="${this._asking}"]`); if (opener && !opener.hidden) opener.focus(); });
+      if (dlg) {
+        dlg.addEventListener("close", () => {
+          const opener = root.querySelector(this._asking === "remove" ? '[data-fil="remove"]' : `[data-act="${this._asking}"]`);
+          if (opener && !opener.hidden) opener.focus();
+        });
+      }
       const pic = root.querySelector(".preview");
       if (pic) {
         pic.addEventListener("load", () => { pic.dataset.ok = "1"; this._showPic(pic); });
@@ -488,11 +632,12 @@
     disconnectedCallback() {
       if (this._snapTimer) { clearInterval(this._snapTimer); this._snapTimer = null; }
       this._stopPos();
+      this._unsubscribe();
     }
 
     connectedCallback() {
       if (this._camImg && !this._snapTimer) this._snapTimer = setInterval(() => this._snapshot(), 10000);
-      if (this._built && this._hass) this._update();
+      if (this._built && this._hass) { this._update(); this._subscribe(); }
     }
 
     _st(what) {
@@ -678,8 +823,9 @@
         list.innerHTML = rows.map((r) => r.head
           ? `<div class="boxhead"><span>${esc(r.head.external ? s.external : s.box(r.head.box))}</span><span class="env" data-box="${r.head.external ? "" : r.head.box}"></span></div>`
           : `<div class="slot" data-slot="${esc(r.slot.label)}"><span class="swatch"></span><span class="lbl">${esc(r.slot.label === "Ext" ? "" : r.slot.label)}</span>
-              <span class="mat"></span><span class="left"></span></div>`).join("");
+              <span class="mat"></span><span class="left"></span><button class="stock" data-fil="slot" hidden></button></div>`).join("");
       }
+      const reg = this._reg;
       const activeSlot = this._st("active_slot");
       const activeLabel = activeSlot ? slotLabel(activeSlot.state) : null;
       for (const box of this._cfg.boxes || []) {
@@ -696,14 +842,9 @@
       for (const slot of all) {
         const row = list.querySelector(`.slot[data-slot="${window.CSS && window.CSS.escape ? window.CSS.escape(slot.label) : slot.label}"]`);
         if (!row) continue;
-        const c = slot.color && this._hass.states[slot.color];
-        const f = slot.filament && this._hass.states[slot.filament];
         const r = slot.remaining && this._hass.states[slot.remaining];
-        const attrs = (c && c.attributes) || (f && f.attributes) || {};
-        const hex = colour(attrs.color_hex) || colour(c && c.state);
-        const filament = f && !["unknown", "unavailable", "", "-", "None"].includes(f.state) ? f.state : null;
+        const { attrs, hex, filament, empty } = this._slotRead(slot);
         const left = num(r && r.state);
-        const empty = !hex && !filament;
         row.querySelector(".swatch").style.background = hex || "transparent";
         row.querySelector(".swatch").style.borderStyle = empty ? "dashed" : "solid";
         const inUse = activeLabel ? activeLabel === slot.label : Number(attrs.selected) === 1;
@@ -719,6 +860,20 @@
         const leftEl = row.querySelector(".left");
         if (leftEl.innerHTML !== leftHtml) leftEl.innerHTML = leftHtml;
         row.setAttribute("aria-label", empty ? `${slot.label} ${s.empty}` : `${slot.label === "Ext" ? s.external : slot.label} ${filament || ""} ${left != null ? s.remaining(Math.round(left)) : ""}`);
+        // the spool's stock number, from the filament register: found by the CFS, confirmed, or waiting to be
+        const btn = row.querySelector(".stock");
+        const held = reg && (reg.slots || {})[slot.label];
+        const used = reg && ((reg.pending || {})[slot.label] || (reg.printing || {})[slot.label]);
+        btn.hidden = !reg || (empty && !held && !used);
+        if (!btn.hidden) {
+          const spool = held && this._spool(held.stock);
+          this._text(btn, held ? held.stock : s.confirm);
+          btn.classList.toggle("unknown", !held);
+          btn.classList.toggle("due", !held && !!used);
+          const title = held ? [held.how === "auto" ? s.auto : s.confirmed, spool ? s.gLeft(this._g(spool.left)) : ""].filter(Boolean).join(" · ") : s.slotHint;
+          if (btn.title !== title) btn.title = title;
+          btn.setAttribute("aria-label", s.stockBtn(this._slotName(slot.label), held && held.stock));
+        }
       }
       // the colours the print was sliced with
       const uses = root.querySelector(".cfs .uses");
@@ -736,16 +891,17 @@
     _act(act) {
       const e = this._cfg.entities;
       if (act === "light") { this._call("light", "toggle", { entity_id: e.light }, "set"); return; }
-      if (act === "stop") { this._ask(); return; }
+      if (act === "stop") { this._ask("stop"); return; }
       this._press(act);
     }
 
-    /* Stop asks first */
-    _ask() {
+    /* Stop asks first, and so does taking a spool out of the register */
+    _ask(what) {
       const s = this._s, dlg = this.shadowRoot.querySelector("dialog.confirm");
       if (!dlg || !dlg.showModal) return;
-      const [title, hint, go, icon] = [s.stopAsk, s.stopHint, s.stopPrint, "mdi:stop"];
-      this._asking = "stop";
+      const [title, hint, go, icon] = what === "remove" ? [s.removeAsk(this._editing), s.removeHint, s.remove, "mdi:delete"]
+        : [s.stopAsk, s.stopHint, s.stopPrint, "mdi:stop"];
+      this._asking = what;
       dlg.querySelector("h3").textContent = title;
       dlg.querySelector("p").textContent = hint;
       const button = dlg.querySelector('[data-dlg="go"]');
@@ -759,6 +915,256 @@
       if (dlg) dlg.close();
       if (choice !== "go") return;
       if (this._asking === "stop") this._press("stop");
+      else if (this._asking === "remove") this._removeSpool();
+    }
+
+    /* ------------------------------------------------------------------ the filament register
+     * Home Assistant sends the register now and whenever it changes; a Printer Panel from before it leaves the Filament
+     * card and the slots' stock numbers out. */
+    _subscribe() {
+      const conn = this._hass && this._hass.connection;
+      if (this._unsub || this._subbing || !conn || !this._built) return;
+      this._subbing = true;
+      const msg = { type: "printer_panel/filament/subscribe" };
+      if (this._entryId) msg.entry_id = this._entryId;
+      const mine = () => msg.entry_id === this._entryId;
+      conn.subscribeMessage((view) => { if (mine()) { this._reg = view; this._filament(); } }, msg)
+        .then((unsub) => { if (this.isConnected && this._built && mine()) this._unsub = unsub; else this._drop(unsub); })
+        .catch(() => { if (mine()) { this._reg = null; this._filament(); } })
+        .finally(() => { this._subbing = false; });
+    }
+
+    _unsubscribe() {
+      if (this._unsub) { this._drop(this._unsub); this._unsub = null; }
+    }
+
+    _drop(unsub) {
+      try { Promise.resolve(unsub()).catch(() => {}); } catch (err) { /* the connection had gone already */ }
+    }
+
+    _spool(stock) {
+      return (this._reg && this._reg.spools.find((x) => x.stock === stock)) || null;
+    }
+
+    _slotName(label) { return label === "Ext" ? this._s.extName : label === UNKNOWN_SLOT ? this._s.unknownSlot : label; }
+
+    _slotWhere(label) { return label === "Ext" ? this._s.onExt : this._s.inSlot(label); }
+
+    /** what the CFS says is in a slot, from the Creality integration's entities for it */
+    _slotRead(slot) {
+      const c = slot && slot.color && this._hass.states[slot.color];
+      const f = slot && slot.filament && this._hass.states[slot.filament];
+      const attrs = (c && c.attributes) || (f && f.attributes) || {};
+      const hex = colour(attrs.color_hex) || colour(c && c.state);
+      const filament = f && !["unknown", "unavailable", "", "-", "None"].includes(f.state) ? f.state : null;
+      return { attrs, hex, filament, empty: !hex && !filament };
+    }
+
+    _slotInfo(label) {
+      const all = [...(this._cfg.boxes || []).flatMap((b) => b.slots), ...(this._cfg.external ? [this._cfg.external] : [])];
+      return this._slotRead(all.find((x) => x.label === label));
+    }
+
+    /** grams as the page says them: "812", "15.2" */
+    _g(v, digits = 0) {
+      const lang = this._lang === "nb" ? "nb-NO" : ((this._hass.locale && this._hass.locale.language) || "en-GB");
+      try { return new Intl.NumberFormat(lang, { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(v); } catch (err) { return Number(v).toFixed(digits); }
+    }
+
+    /* the Filament card: what waits for a stock number, then the spools; and the stock numbers on the CFS's slots */
+    _filament() {
+      const root = this.shadowRoot, s = this._s, reg = this._reg;
+      const card = root.querySelector(".filament");
+      if (!card) return;
+      card.hidden = !reg;
+      this._cfs();
+      if (!reg) return;
+      const slots = reg.slots || {}, pending = reg.pending || {}, printing = reg.printing || {};
+      const waits = [
+        ...Object.entries(pending).map(([label, g]) => [label, s.waits(this._slotName(label), this._g(g, 1))]),
+        ...Object.entries(printing).filter(([label, g]) => g > 0 && !slots[label] && !(label in pending))
+          .map(([label, g]) => [label, s.waitsNow(this._slotName(label), this._g(g, 1))]),
+      ];
+      const waitHtml = waits.map(([label, text]) => `<div class="waiting"><span>${esc(text)}</span>
+        <button class="btn small" data-fil="slot" data-for="${esc(label)}">${esc(s.confirm)}</button></div>`).join("");
+      const list = card.querySelector(".waitlist");
+      if (list.innerHTML !== waitHtml) list.innerHTML = waitHtml;
+      const thisPrint = {};
+      for (const [label, g] of Object.entries(printing)) if (slots[label] && slots[label].stock) thisPrint[slots[label].stock] = g;
+      const spoolsHtml = reg.spools.length ? reg.spools.map((x) => {
+        const pct = x.weight > 0 ? Math.max(0, Math.min(100, (x.left / x.weight) * 100)) : 0;
+        const sub = [x.type, x.slot ? this._slotWhere(x.slot) : "", thisPrint[x.stock] ? s.thisPrint(this._g(thisPrint[x.stock], 1)) : ""];
+        return `<div class="spool${pct <= 10 ? " low" : ""}" data-stock="${esc(x.stock)}"><span class="swatch" style="background:${colour(x.hex) || "transparent"}"></span>
+          <span class="who"><b>${esc(x.stock)}</b>${esc([x.brand, x.colour].filter(Boolean).join(" "))}<small>${esc(sub.filter(Boolean).join(" · "))}</small></span>
+          <span class="grams">${esc(s.gLeft(this._g(x.left)))}<small>${esc(s.ofG(this._g(x.weight)))}</small><span class="mini"><i style="width:${pct}%"></i></span></span>
+          <button class="iconbtn" data-fil="edit" data-stock="${esc(x.stock)}" aria-label="${esc(s.editSpool(x.stock))}"><ha-icon icon="mdi:pencil"></ha-icon></button></div>`;
+      }).join("") : `<div class="none">${esc(s.noSpools)}</div>`;
+      const spools = card.querySelector(".spools");
+      if (spools.innerHTML !== spoolsHtml) spools.innerHTML = spoolsHtml;
+      // what the boxes offer while typing: brands and types known, and the stock numbers in the register
+      const options = (id, values) => {
+        const el = root.getElementById(id), html = values.map(([v, label]) => `<option value="${esc(v)}">${label ? esc(label) : ""}</option>`).join("");
+        if (el && el.innerHTML !== html) el.innerHTML = html;
+      };
+      const known = (list, key) => [...new Set([...list, ...reg.spools.map((x) => x[key])])].filter(Boolean).map((v) => [v]);
+      options("pp-brands", known(BRANDS, "brand"));
+      options("pp-types", known(TYPES, "type"));
+      options("pp-stock", reg.spools.map((x) => [x.stock, `${[x.brand, x.colour, x.type].filter(Boolean).join(" ")}, ${s.gLeft(this._g(x.left))}`]));
+    }
+
+    _fil(t) {
+      const what = t.dataset.fil;
+      if (what === "checkin") this._openSpool(null);
+      else if (what === "edit") this._openSpool(t.dataset.stock);
+      else if (what === "slot") this._openSlot(t.dataset.for || t.closest("[data-slot]").dataset.slot);
+      else if (what === "pick") {
+        const dlg = t.closest("dialog");
+        dlg.querySelector('[name="stock"]').value = t.dataset.stock;
+        dlg.querySelector("[data-go]").focus();
+      } else if (what === "clear") this._confirmSlot(true);
+      else if (what === "new") this._newFromSlot();
+      else if (what === "remove") this._ask("remove");
+      else if (what === "close") { const dlg = t.closest("dialog"); if (dlg) dlg.close(); }
+    }
+
+    _say(dlg, text) {
+      this._text(dlg.querySelector(".dmsg"), text);
+    }
+
+    /** a change to the register; a refusal is said in the dialog. Resolves { result } when it worked, else null. */
+    async _ws(msg, dlg, verb) {
+      const s = this._s, go = dlg.querySelector("[data-go]");
+      if (this._entryId) msg.entry_id = this._entryId;
+      go.disabled = true;
+      try {
+        return { result: await this._hass.callWS(msg) };
+      } catch (err) {
+        this._say(dlg, err && err.code === "not_found" && msg.stock ? s.noSuch(msg.stock) : s.failed(s.verbs[verb], (err && err.message) || String(err)));
+        return null;
+      } finally {
+        go.disabled = false;
+      }
+    }
+
+    /* which spool is in a slot: the number written on it, with the likeliest spools to pick from */
+    _openSlot(label) {
+      const s = this._s, reg = this._reg, dlg = this.shadowRoot.querySelector("dialog.slotform");
+      if (!reg || !dlg || !dlg.showModal) return;
+      this._slotOpen = label;
+      const info = this._slotInfo(label), held = (reg.slots || {})[label], waiting = (reg.pending || {})[label];
+      dlg.querySelector("h3").textContent = label === "Ext" ? s.extTitle : label === UNKNOWN_SLOT ? s.unknownTitle : s.slotTitle(label);
+      const said = info.empty ? "" : s.cfsSays([info.filament || [info.attrs.vendor, info.attrs.name].filter(Boolean).join(" "), info.hex].filter(Boolean).join(", "));
+      dlg.querySelector(".slothint").textContent = [waiting ? s.slotWaits(this._g(waiting, 1)) : s.slotHint, said].filter(Boolean).join(" ");
+      dlg.querySelector('[name="stock"]').value = held ? held.stock : "";
+      dlg.querySelector(".picks").innerHTML = this._likely(label, info).slice(0, 4).map((x) => `<button type="button" class="pick" data-fil="pick" data-stock="${esc(x.stock)}">
+        <span class="dot" style="background:${colour(x.hex) || "transparent"}"></span>${esc([x.stock, x.brand, x.colour].filter(Boolean).join(" "))}</button>`).join("");
+      dlg.querySelector('[data-fil="clear"]').hidden = !held;
+      this._say(dlg, "");
+      dlg.showModal();
+      dlg.querySelector('[name="stock"]').focus();
+    }
+
+    /** the spools that could be in a slot, likeliest first: of its type, then nearest its colour; not in another slot, not used up */
+    _likely(label, info) {
+      const reg = this._reg;
+      const elsewhere = new Set(Object.entries(reg.slots || {}).filter(([k]) => k !== label).map(([, v]) => v.stock));
+      const rgb = (h) => { const c = colour(h); return c ? [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16)) : null; };
+      const want = rgb(info.hex), type = String(info.attrs.type || "").toUpperCase();
+      const far = (x) => { const c = rgb(x.hex); return want && c ? Math.hypot(c[0] - want[0], c[1] - want[1], c[2] - want[2]) : 0; };
+      const fits = (x) => (type && String(x.type).toUpperCase().includes(type) ? 0 : 1);
+      return reg.spools.filter((x) => x.left > 0 && !elsewhere.has(x.stock))
+        .map((x) => ({ x, fit: fits(x), far: far(x) })).sort((a, b) => a.fit - b.fit || a.far - b.far).map((e) => e.x);
+    }
+
+    async _confirmSlot(clear) {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.slotform");
+      let stock = null;
+      if (!clear) {
+        stock = stockNo(dlg.querySelector('[name="stock"]').value);
+        if (!stock) { this._say(dlg, s.needStock); return; }
+        if (!this._spool(stock)) { this._say(dlg, s.noSuch(stock)); return; }
+      }
+      if (await this._ws({ type: "printer_panel/filament/confirm", slot: this._slotOpen, stock }, dlg, "confirm")) dlg.close();
+    }
+
+    /* a spool in a slot that is not in the register yet: checked in with what the CFS says, then confirmed in the slot */
+    _newFromSlot() {
+      const label = this._slotOpen, info = this._slotInfo(label), a = info.attrs;
+      this.shadowRoot.querySelector("dialog.slotform").close();
+      const creality = /creality/i.test(a.vendor || "");
+      this._forSlot = label;
+      this._openSpool(null, { brand: creality ? "Creality" : "", type: creality && a.name ? a.name : a.type, hex: info.hex });
+    }
+
+    /* checking a spool in (prefill: what the CFS says), or changing one */
+    _openSpool(stock, prefill) {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.spoolform");
+      if (!dlg || !dlg.showModal) return;
+      const spool = stock ? this._spool(stock) : null;
+      if (stock && !spool) return;
+      this._editing = spool ? spool.stock : null;
+      this._spoolDone = false;
+      if (!prefill) this._forSlot = null;
+      const v = spool || prefill || {}, field = (n) => dlg.querySelector("form").elements.namedItem(n);
+      field("brand").value = v.brand || "";
+      field("colour").value = v.colour || "";
+      field("hex").value = colour(v.hex) || "#808080";
+      field("material").value = v.type || "";
+      field("weight").value = spool ? String(spool.weight) : "1000";
+      field("left").value = spool ? String(spool.left) : "";
+      dlg.querySelector("[data-left]").hidden = !spool;
+      dlg.querySelector('[data-part="edit"]').hidden = false;
+      dlg.querySelector('[data-part="done"]').hidden = true;
+      dlg.querySelector('[data-fil="remove"]').hidden = !spool;
+      dlg.querySelector('[data-fil="close"]').hidden = false;
+      dlg.querySelector("[data-go]").textContent = spool ? s.save : s.checkIn;
+      dlg.querySelector("h3").textContent = spool ? s.editTitle(spool.stock) : s.checkInTitle;
+      this._say(dlg, "");
+      dlg.showModal();
+      field(prefill && prefill.brand ? "colour" : "brand").focus();
+    }
+
+    async _saveSpool() {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.spoolform");
+      if (this._spoolDone) { dlg.close(); return; }
+      const field = (n) => dlg.querySelector("form").elements.namedItem(n);
+      const no = (text, name) => { this._say(dlg, text); field(name).focus(); };
+      const brand = field("brand").value.trim(), material = field("material").value.trim(), weight = Number(field("weight").value);
+      const leftText = field("left").value.trim(), left = Number(leftText);
+      if (!brand) { no(s.need(s.brand), "brand"); return; }
+      if (!material) { no(s.need(s.type), "material"); return; }
+      if (!(weight > 0 && weight <= 10000)) { no(s.weightRange, "weight"); return; }
+      const msg = { brand, colour: field("colour").value.trim(), hex: field("hex").value, material, weight };
+      if (this._editing) {
+        if (leftText && !(left >= 0 && left <= 10000)) { no(s.leftRange, "left"); return; }
+        if (leftText) msg.left = left;
+        if (await this._ws({ type: "printer_panel/filament/update", stock: this._editing, ...msg }, dlg, "save")) dlg.close();
+        return;
+      }
+      const done = await this._ws({ type: "printer_panel/filament/check_in", ...msg }, dlg, "checkIn");
+      if (!done) return;
+      const stock = done.result.stock;
+      let where = done.result.slot;
+      if (this._forSlot && (await this._ws({ type: "printer_panel/filament/confirm", slot: this._forSlot, stock }, dlg, "confirm"))) {
+        where = this._forSlot === UNKNOWN_SLOT ? null : this._forSlot;
+      }
+      this._forSlot = null;
+      // the number to write on the spool
+      this._spoolDone = true;
+      dlg.querySelector('[data-part="edit"]').hidden = true;
+      const part = dlg.querySelector('[data-part="done"]');
+      part.hidden = false;
+      part.querySelector("p").textContent = s.checkedIn;
+      part.querySelector(".bignum").textContent = stock;
+      part.querySelector(".donehint").textContent = [s.writeIt(stock), where ? s.isIn(this._slotWhere(where)) : ""].filter(Boolean).join(" ");
+      dlg.querySelector('[data-fil="close"]').hidden = true;
+      dlg.querySelector("[data-go]").textContent = s.done;
+      dlg.querySelector("[data-go]").focus();
+    }
+
+    async _removeSpool() {
+      const dlg = this.shadowRoot.querySelector("dialog.spoolform");
+      if (this._editing && (await this._ws({ type: "printer_panel/filament/remove", stock: this._editing }, dlg, "remove"))) dlg.close();
     }
 
     /* the pause at a line: the box, the line it is set to, and where the printer is */
@@ -885,6 +1291,8 @@
     set panel(panel) {
       const id = panel && panel.config && panel.config.entry_id;
       if (id && id !== this._entryId) {
+        this._unsubscribe();
+        this._reg = null;
         this._entryId = id;
         this._cfg = null;
         this._built = false;
@@ -905,6 +1313,8 @@
       this._config = Object.assign({}, config || {});
       this.classList.add("card");
       if (this._config.entry_id && this._config.entry_id !== this._entryId) {
+        this._unsubscribe();
+        this._reg = null;
         this._entryId = this._config.entry_id;
         this._cfg = null;
         this._built = false;
@@ -930,10 +1340,10 @@
     window.customCards = window.customCards || [];
     if (!window.customCards.some((c) => c.type === "printer-panel-card")) {
       window.customCards.push({ type: "printer-panel-card", name: "Printer Panel", preview: false,
-                                description: "A Creality printer: the camera, the print, temperatures, the CFS colours, and Pause, Resume and Stop." });
+                                description: "A Creality printer: the camera, the print, temperatures, the CFS colours, the filament register, and Pause, Resume and Stop." });
     }
   });
 
   // for the tests
-  window.__printerPanel = { printName, duration, colour, slotLabel, repairSidebarIcons };
+  window.__printerPanel = { printName, duration, colour, slotLabel, stockNo, repairSidebarIcons };
 })();

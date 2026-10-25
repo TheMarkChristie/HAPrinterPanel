@@ -30,7 +30,6 @@ if sys.platform == "win32":
 
     pytest_socket.disable_socket = lambda *args, **kwargs: None
 
-from homeassistant.components import websocket_api  # noqa: E402
 from homeassistant.core import HomeAssistant, ServiceCall  # noqa: E402
 from homeassistant.helpers import device_registry as dr, entity_registry as er  # noqa: E402
 from homeassistant.loader import async_get_integration  # noqa: E402
@@ -41,10 +40,9 @@ FIXTURE = json.loads((ROOT / "tests" / "fixtures" / "k2plus.json").read_text(enc
 
 
 async def _light_setup(hass: HomeAssistant, config: Any) -> bool:
-    from custom_components.printer_panel import ws_config, ws_position
+    from custom_components.printer_panel import register_commands
 
-    websocket_api.async_register_command(hass, ws_config)
-    websocket_api.async_register_command(hass, ws_position)
+    register_commands(hass)
     return True
 
 
