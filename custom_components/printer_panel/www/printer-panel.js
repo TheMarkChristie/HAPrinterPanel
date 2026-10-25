@@ -82,7 +82,8 @@
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
       failed: (what, why) => `Could not ${what}: ${why}`,
       verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause", checkIn: "check it in",
-               save: "save it", remove: "remove it", confirm: "confirm it", forget: "drop them" },
+               save: "save it", remove: "remove it", confirm: "confirm it", forget: "drop them", pdf: "make the PDF" },
+      pdf: "PDF", pdfLabel: "Download the register as a PDF: the spools in stock and what has gone out of stock in the last 30 days",
       inCfs: "In the CFS", onShelf: (n) => `On the shelf (${n})`, find: "Find: number, brand, colour or type", noMatch: "No spool matches.",
       forget: "Not a spool in the register: drop these grams",
       filament: "Filament", checkIn: "Check in", checkInTitle: "Check in a spool", editTitle: (n) => `Spool ${n}`,
@@ -133,7 +134,9 @@
       fanModel: "Delkjøling", fanSide: "Sidevifte", fanCase: "Kabinettvifte", fanOn: (w) => `${w} av eller på`, fanLevel: (w) => `Fart for ${w.toLowerCase()}`,
       failed: (what, why) => `Kunne ikke ${what}: ${why}`,
       verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen",
-               checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den", forget: "glemme dem" },
+               checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den", forget: "glemme dem",
+               pdf: "lage PDF-en" },
+      pdf: "PDF", pdfLabel: "Last ned registeret som PDF: spolene på lager og det som har gått ut av lager de siste 30 dagene",
       inCfs: "I CFS-en", onShelf: (n) => `På hylla (${n})`, find: "Finn: nummer, merke, farge eller type", noMatch: "Ingen spole passer.",
       forget: "Ikke en spole i registeret: glem disse grammene",
       filament: "Filament", checkIn: "Sjekk inn", checkInTitle: "Sjekk inn en spole", editTitle: (n) => `Spole ${n}`,
@@ -344,6 +347,8 @@
     .uses { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 12px; color: var(--secondary-text-color); font-size: 13px; }
     .uses .dot { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
     .note { color: var(--secondary-text-color); padding: 24px 16px; }
+    .filament h2 .aside { display: flex; gap: 8px; }
+    .fmsg { margin: -4px 0 8px; }
     .waitlist { display: grid; gap: 8px; }
     .waitlist:not(:empty) { margin-bottom: 8px; }
     .waiting { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; font-size: 14px;
@@ -481,8 +486,10 @@
           <div class="grid">
             <div class="col">
               <div class="camwrap"></div>
-              <ha-card class="filament" hidden><h2>${esc(s.filament)}<span class="aside"><button class="btn small" data-fil="checkin">
-                <ha-icon icon="mdi:plus"></ha-icon>${esc(s.checkIn)}</button></span></h2>
+              <ha-card class="filament" hidden><h2>${esc(s.filament)}<span class="aside">
+                <button class="btn small" data-fil="pdf" title="${esc(s.pdfLabel)}" aria-label="${esc(s.pdfLabel)}"><ha-icon icon="mdi:file-pdf-box"></ha-icon>${esc(s.pdf)}</button>
+                <button class="btn small" data-fil="checkin"><ha-icon icon="mdi:plus"></ha-icon>${esc(s.checkIn)}</button></span></h2>
+                <div class="msg fmsg" role="status" aria-live="polite"></div>
                 <div class="waitlist"></div>
                 <input class="find" type="search" autocomplete="off" spellcheck="false" placeholder="${esc(s.find)}" aria-label="${esc(s.find)}" hidden>
                 <div class="spools"></div></ha-card>
@@ -1070,6 +1077,7 @@
     _fil(t) {
       const what = t.dataset.fil;
       if (what === "checkin") this._openSpool(null);
+      else if (what === "pdf") this._pdf(t);
       else if (what === "edit") this._openSpool(t.dataset.stock);
       else if (what === "slot") this._openSlot(t.dataset.for || t.closest("[data-slot]").dataset.slot);
       else if (what === "pick") {
@@ -1082,6 +1090,30 @@
       else if (what === "new") this._newFromSlot();
       else if (what === "remove") this._ask("remove");
       else if (what === "close") { const dlg = t.closest("dialog"); if (dlg) dlg.close(); }
+    }
+
+    /* the register as a PDF: Home Assistant signs the path for a minute, as for its own downloads, so the phone app's
+       browser can fetch it without the page's token */
+    async _pdf(btn) {
+      const s = this._s, msg = this.shadowRoot.querySelector(".fmsg");
+      btn.disabled = true;
+      try {
+        const lang = this._lang === "nb" ? "nb" : "en";
+        const signed = await this._hass.callWS({ type: "auth/sign_path", path: `/api/printer_panel/${this._cfg.entry_id}/filament/${lang}.pdf`, expires: 60 });
+        const d = new Date(), pad = (n) => String(n).padStart(2, "0");
+        const a = document.createElement("a");
+        a.href = this._hass.hassUrl(signed.path);
+        a.download = `filament-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.pdf`;
+        a.rel = "noopener";
+        this.shadowRoot.appendChild(a);
+        a.click();
+        a.remove();
+        this._text(msg, "");
+      } catch (err) {
+        this._text(msg, s.failed(s.verbs.pdf, (err && err.message) || String(err)));
+      } finally {
+        btn.disabled = false;
+      }
     }
 
     _say(dlg, text) {

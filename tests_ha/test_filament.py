@@ -114,6 +114,23 @@ async def test_confirmed_before_a_stopped_print_it_comes_off_at_once(hass: HomeA
     assert _register(hass, entry).spool("F001")["left"] == 990.0 and not _register(hass, entry).pending
 
 
+async def test_a_spool_in_with_nothing_set_can_be_confirmed_before_the_print(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    """Norway's 1B on 25 Oct 2026: filament unknown, but the CFS's state 1 says a spool is in."""
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    blank = {"vendor": "", "type": "", "name": "", "color_hex": "", "rfid": "", "spool_key": None, "selected": 0}
+    hass.states.async_set(SLOT_B, "unknown", {**blank, "state": None})
+    await hass.async_block_till_done()
+    assert "1B" in _register(hass, entry).slots, "unknown with no state: the integration cannot say yet, the slot stays"
+    hass.states.async_set(SLOT_B, "unknown", {**blank, "state": 1})
+    await hass.async_block_till_done()
+    assert _register(hass, entry).slots["1B"]["key"], "a spool is in"
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    assert (await _ask(client, 2, {"type": "printer_panel/filament/confirm", "slot": "1B", "stock": "F001"}))["success"]
+    await _print(hass, [(0, "box_1_slot_2"), (3356, "box_1_slot_2")])
+    assert _register(hass, entry).spool("F001")["left"] == 990.0 and not _register(hass, entry).pending
+
+
 async def test_a_print_under_way_when_home_assistant_restarts_is_taken_up(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
     entry = await _add(hass, k2plus)
     client = await hass_ws_client(hass)
@@ -145,6 +162,38 @@ async def test_the_printer_off_leaves_the_slots_and_an_emptied_slot_lets_its_spo
     hass.states.async_set(SLOT_B, "-", {"vendor": "", "type": "", "name": "", "color_hex": "", "state": 0})
     await hass.async_block_till_done()
     assert "1B" not in _register(hass, entry).slots
+
+
+async def test_the_register_as_a_pdf(hass: HomeAssistant, k2plus, hass_ws_client, hass_client, hass_client_no_auth) -> None:
+    """The page's PDF button: a path Home Assistant signs, fetched without the page's token, in English or Norwegian."""
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.printer_panel import FilamentPdfView
+
+    assert await async_setup_component(hass, "http", {})
+    assert await async_setup_component(hass, "auth", {})
+    hass.http.register_view(FilamentPdfView())
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Creality", "Purple", "#9e007e", "Hyper PLA")
+    await _check_in(client, 2, "Sunlu", "Black", "#000000")
+    assert (await _ask(client, 3, {"type": "printer_panel/filament/remove", "stock": "F002"}))["success"]
+    web = await hass_client()
+    for lang, words in (("en", [b"(Filament register)", b"(In stock \\(1\\))", b"(F001)", b"(1D)", b"(Removed)"]),
+                        ("nb", [b"(Filamentregister)", b"(P\\345 lager \\(1\\))", b"(Fjernet)"])):
+        answer = await web.get(f"/api/printer_panel/{entry.entry_id}/filament/{lang}.pdf")
+        assert answer.status == 200 and answer.content_type == "application/pdf"
+        assert answer.headers["Content-Disposition"].startswith('attachment; filename="filament-')
+        body = await answer.read()
+        assert body.startswith(b"%PDF-1.4") and all(w in body for w in words), lang
+    assert (await web.get("/api/printer_panel/nope/filament/en.pdf")).status == 404
+    path = f"/api/printer_panel/{entry.entry_id}/filament/en.pdf"
+    anyone = await hass_client_no_auth()
+    assert (await anyone.get(path)).status == 401
+    signed = await _ask(client, 4, {"type": "auth/sign_path", "path": path, "expires": 60})
+    assert signed["success"], signed
+    answer = await anyone.get(signed["result"]["path"])
+    assert answer.status == 200 and (await answer.read()).startswith(b"%PDF")
 
 
 async def test_editing_removing_and_deleting_the_printer(hass: HomeAssistant, k2plus, hass_ws_client, hass_storage) -> None:

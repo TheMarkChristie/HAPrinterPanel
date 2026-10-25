@@ -226,6 +226,41 @@ def test_an_edited_spool_and_one_weighed():
         r.update("F001", {"left": -5})
 
 
+def test_a_spool_used_up_or_removed_has_gone_out_of_stock():
+    r = f.Register()
+    r.today = lambda: DAY
+    r.check_in("Generic", "Black", "#000000", "PLA", 10, DAY)
+    r.check_in("Sunlu", "White", "#ffffff", "PLA", 1000, DAY)
+    r.check_in("eSun", "Pink", "#ff37af", "PLA+", 1000, DAY)
+    r.slot_seen("1B", BLACK)
+    r.confirm("1B", "F001")
+    r.track("a.gcode", 0, "1B")
+    r.track("a.gcode", 5000, "1B")                       # 15 g from a 10 g spool
+    r.end()
+    assert r.spool("F001")["left"] == 0.0
+    assert [(g["stock"], g["why"], g["out"]) for g in r.gone] == [("F001", "used_up", DAY)]
+    r.remove("F001")
+    assert [(g["stock"], g["why"]) for g in r.gone] == [("F001", "used_up")], "removed once used up: still used up"
+    r.remove("F002")
+    r.update("F003", {"left": 0})
+    assert [(g["stock"], g["why"]) for g in r.gone_since()] == [("F003", "used_up"), ("F002", "removed"), ("F001", "used_up")]
+    r.update("F003", {"left": 250})
+    assert "F003" not in [g["stock"] for g in r.gone], "weighed, and not empty after all"
+    assert f.Register(json.loads(json.dumps(r.to_dict()))).gone == r.gone
+
+
+def test_recently_is_30_days_and_a_year_is_kept():
+    r = f.Register()
+    r.gone = [{"stock": "F001", "out": "2025-10-01", "why": "removed"}, {"stock": "F002", "out": "2026-09-20", "why": "removed"},
+              {"stock": "F003", "out": "2026-10-01", "why": "used_up"}]
+    r.today = lambda: DAY
+    r.next = 4
+    assert [g["stock"] for g in r.gone_since()] == ["F003"]
+    r.check_in("Sunlu", "White", "#ffffff", "PLA", 1000, DAY)
+    r.remove("F004")
+    assert [g["stock"] for g in r.gone] == ["F002", "F003", "F004"], "older than a year: forgotten"
+
+
 def test_the_register_keeps_through_storage():
     r = f.Register()
     r.check_in("Creality", "Purple", "#9e007e", "PLA", 1000, DAY)

@@ -4,17 +4,20 @@ the CFS's colours, speed and fans, the light, and Pause, Resume and Stop; and ph
 pauses, runs out of filament or stops with an error. The same view is a card (custom:printer-panel-card). Through the
 printer's Moonraker, two entities of its own on the printer: Count G-code lines, and Pause at G-code line. And a
 filament register: spools checked in with a stock number, matched to the CFS slots, and what each print used taken
-off them."""
+off them, with a PDF of it."""
 from __future__ import annotations
 
+import copy
 import hashlib
 from pathlib import Path
 from typing import Any
 
 import voluptuous as vol
+from aiohttp import web
 
 from homeassistant.components import frontend, panel_custom, websocket_api
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import KEY_HASS, HomeAssistantView, StaticPathConfig
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
@@ -22,11 +25,13 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
 from .linepause import STORE_VERSION
 from .link import PrinterLink
+from .pdf import register_pdf
 from .register import STORE_VERSION as FILAMENT_STORE_VERSION
 
 WWW = Path(__file__).parent / "www"
@@ -59,6 +64,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
         await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, str(WWW), cache_headers=False)])
         hass.data[_STATIC] = True
         register_commands(hass)
+        hass.http.register_view(FilamentPdfView())
     frontend.add_extra_js_url(hass, await _script_url(hass))
     return True
 
@@ -240,3 +246,26 @@ async def ws_filament_forget(hass: HomeAssistant, connection: websocket_api.Acti
         return {"dropped": round(await register.forget(msg["slot"]), 1)}
 
     await _filament_call(hass, connection, msg, work)
+
+
+class FilamentPdfView(HomeAssistantView):
+    """The filament register as a PDF to download: the spools in stock and what has gone out of stock in the last 30
+    days, in English or Norwegian (nb). The page asks Home Assistant to sign the path, as its own downloads do, so the
+    phone app's browser can fetch it."""
+
+    url = "/api/printer_panel/{entry_id}/filament/{lang}.pdf"
+    name = "api:printer_panel:filament_pdf"
+    requires_auth = True
+
+    async def get(self, request: web.Request, entry_id: str, lang: str) -> web.Response:
+        hass = request.app[KEY_HASS]
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN or entry.state is not ConfigEntryState.LOADED:
+            return web.Response(status=404, text="No such printer in Printer Panel")
+        link = entry.runtime_data
+        device = link.describe().get("name") or entry.title
+        made = dt_util.now()
+        data = copy.deepcopy(link.filament.book.to_dict())   # a print may change the register while the PDF is drawn
+        body = await hass.async_add_executor_job(register_pdf, data, device, lang, made)
+        return web.Response(body=body, content_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="filament-{made.date().isoformat()}.pdf"'})

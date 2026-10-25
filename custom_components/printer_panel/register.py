@@ -36,14 +36,20 @@ class FilamentRegister:
     def __init__(self, link: PrinterLink) -> None:
         self.link = link
         self.hass = link.hass
-        self.book = Register()
+        self.book = self._book({})
         self._store: Store[dict[str, Any]] = Store(self.hass, STORE_VERSION, f"{DOMAIN}.{link.entry.entry_id}.filament")
         self._listeners: list[Callable[[], None]] = []
         self._unwatch: CALLBACK_TYPE | None = None
         self._told = 0.0
 
     async def async_load(self) -> None:
-        self.book = Register(await self._store.async_load() or {})
+        self.book = self._book(await self._store.async_load() or {})
+
+    @staticmethod
+    def _book(data: dict[str, Any]) -> Register:
+        book = Register(data)
+        book.today = lambda: dt_util.now().date().isoformat()   # the house's day, not UTC's
+        return book
 
     # ------------------------------------------------------------------ following the printer
     def _slot_entities(self) -> dict[str, str]:
@@ -194,7 +200,7 @@ class FilamentRegister:
 
     # ------------------------------------------------------------------ what the page asks
     async def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any) -> dict[str, Any]:
-        spool = self.book.check_in(brand, colour, hex_, material, weight, dt_util.now().date().isoformat())
+        spool = self.book.check_in(brand, colour, hex_, material, weight, self.book.today())
         self._rematch()
         await self._save_now()
         self._tell(now=True)

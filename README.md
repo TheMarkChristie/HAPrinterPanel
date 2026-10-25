@@ -106,6 +106,12 @@ register** on the slot. Taking a spool out of a slot clears the slot; the printe
 The card lists the spools in the CFS first, in slot order, then the shelf by stock number. With more than eight spools
 it has a box to find one: by number (`14` finds F014), brand, colour, type or slot, every word matching.
 
+**PDF** on the Filament card downloads the register as an A4 PDF, in the page's language: the spools in stock (number,
+colour, brand, type, slot, when checked in, grams left of the label's weight, low ones in amber), then what has gone out
+of stock in the last 30 days. A spool has gone out of stock when its grams reach 0 (a print, or weighed empty) or when it
+is removed; each is kept a year, with the day and why. The link is signed by Home Assistant for a minute, as its own
+downloads are, so it works in the phone app too.
+
 Change a spool (or its grams left, after weighing it) with its pencil; **Remove** takes it out of the register. The
 register is kept in Home Assistant's storage, a print under way when Home Assistant restarts is taken up where it was,
 and deleting the printer's entry deletes its register. Printer Panel reads all of this from the Creality integration's
@@ -150,6 +156,8 @@ register through a print, a restart and the printer off (needs `pytest-homeassis
 Windows also stand-ins for `fcntl` and `resource` on the path); `python tests/render_panel.py` draws the page in
 headless Chrome from the K2 Plus fixture, presses every control and screenshots it wide and on a phone;
 `python tests/render_icons.py` checks the sidebar icon repair against Home Assistant's own icon element;
+`python tests/render_pdf.py` draws the register's PDF with 40 spools and in Norwegian and turns its pages into pictures
+(needs PyMuPDF);
 `python brand/make_brand.py` fetches the brand images.
 
 Creality and the Creality logo are trademarks of Shenzhen Creality 3D Technology Co., Ltd.; the mark is used only to

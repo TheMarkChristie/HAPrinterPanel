@@ -87,6 +87,8 @@ const mk = (lang) => ({ states, locale: { language: lang, time_format: "24", tim
   language: lang, hassUrl: (u) => u, connection,
   callWS: async (m) => { if (m.type === "printer_panel/position") window.POS_ASKED = (window.POS_ASKED || 0) + 1;
     if (m.type.startsWith("printer_panel/filament/")) return filament(m);
+    if (m.type === "auth/sign_path") { calls.push(`ws ${JSON.stringify(m)}`); if (window.SIGN_REFUSE) throw { code: "unauthorized", message: window.SIGN_REFUSE };
+      return { path: `${m.path}?authSig=x` }; }
     return m.type === "printer_panel/config" ? CONFIG : m.type === "printer_panel/position" ? JSON.parse(JSON.stringify(window.POS)) : null; },
   callService: async (d, s, data) => { calls.push(`${d}.${s} ${JSON.stringify(data)}`); if (window.REFUSE) throw new Error(window.REFUSE); } });
 const set = (id, state) => { states = JSON.parse(JSON.stringify(states)); states[id] = { ...states[id], state }; panel.hass = mk("en"); };
@@ -237,7 +239,14 @@ const pictures = async () => {
   r.querySelector('.spool[data-stock="F002"] [data-fil="edit"]').click(); await wait(20);
   out(`changing a spool: from the CFS shown ${vis("dialog.spoolform .fromcfs")}`);
   spoolDlg.close();
-  out(`colour names: ${["#9e007e", "#2f6f7a", "#00a3ff", "#c12e1f", "#f4f4f4", "#ff37af"].map((h) => `${h} ${window.__printerPanel.colourName(h, "en")}`).join(", ")} | nb #2f6f7a ${window.__printerPanel.colourName("#2f6f7a", "nb")}`);
+  const realClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () { window.DOWNLOAD = `${this.getAttribute("href")} as ${this.download}`; };
+  q('[data-fil="pdf"]').click(); await wait(30);
+  out(`PDF -> ${calls.pop()} | download ${window.DOWNLOAD.replace(/\d{4}-\d\d-\d\d/, "YYYY-MM-DD")} | link left behind ${!!r.querySelector("a[download]")}`);
+  window.SIGN_REFUSE = "Unauthorized"; q('[data-fil="pdf"]').click(); await wait(30);
+  out(`PDF refused: "${txt(".fmsg")}" | button enabled ${!q('[data-fil="pdf"]').disabled}`);
+  window.SIGN_REFUSE = null; HTMLAnchorElement.prototype.click = realClick; calls.length = 0;
+  out(`colour names:${["#9e007e", "#2f6f7a", "#00a3ff", "#c12e1f", "#f4f4f4", "#ff37af"].map((h) => `${h} ${window.__printerPanel.colourName(h, "en")}`).join(", ")} | nb #2f6f7a ${window.__printerPanel.colourName("#2f6f7a", "nb")}`);
   r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
   out(`change F003: "${txt("dialog.spoolform h3")}" | ${fields(["brand", "colour", "hex", "material", "weight", "left"])} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
   sf("left", "50"); spoolDlg.querySelector("[data-go]").click(); await wait(30);

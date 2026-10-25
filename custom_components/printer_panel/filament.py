@@ -13,12 +13,16 @@ we can have a stock number written on it so we can confirm before or after the p
 - While a print runs, the printer's own count of the filament it has used goes up; each step is booked to the slot
   printing at the time. When the print ends, finished or stopped, each slot's length is weighed (1.75 mm filament at
   its type's density) and comes off its spool, or waits on the slot until its stock number is confirmed.
+- A spool whose grams reach 0 (a print, or weighed empty) or that is taken out of the register has gone out of stock:
+  noted with the day and why, kept a year, and the last 30 days are in the register's PDF ("a pdf with the list and
+  what has gone out of stock recently").
 """
 from __future__ import annotations
 
 import math
 import re
-from typing import Any
+from datetime import date, timedelta
+from typing import Any, Callable
 
 DIAMETER_MM = 1.75
 # g/cm3, the first that fits wins (so PLA-CF before PLA, PETG before PET)
@@ -29,6 +33,9 @@ DEFAULT_DENSITY = 1.24
 COLOUR_NEAR = 48            # RGB distance within which a Creality spool's colour is the CFS's
 MAX_WEIGHT = 10000          # g; a 10 kg spool is the largest anyone checks in
 UNKNOWN_SLOT = "?"          # where grams go while the printer does not say which slot is printing
+RECENT_DAYS = 30            # "recently" gone out of stock, for the PDF
+GONE_KEEP_DAYS = 365       # how long a spool gone out of stock is remembered
+USED_UP, REMOVED = "used_up", "removed"
 HEX = re.compile(r"^#?([0-9a-f]{6})(?:[0-9a-f]{2})?$", re.I)
 SLOT_STATE = re.compile(r"box\D*(\d+)\D*slot\D*(\d+)", re.I)
 
@@ -96,9 +103,12 @@ class Register:
         self.slots: dict[str, dict[str, Any]] = {k: dict(v) for k, v in (data.get("slots") or {}).items()}
         self.pending: dict[str, dict[str, Any]] = {k: dict(v) for k, v in (data.get("pending") or {}).items()}
         self.job: dict[str, Any] | None = dict(data["job"]) if data.get("job") else None
+        self.gone: list[dict[str, Any]] = [dict(g) for g in data.get("gone") or []]
+        self.today: Callable[[], str] = lambda: date.today().isoformat()
 
     def to_dict(self) -> dict[str, Any]:
-        return {"next": self.next, "spools": self.spools, "slots": self.slots, "pending": self.pending, "job": self.job}
+        return {"next": self.next, "spools": self.spools, "slots": self.slots, "pending": self.pending, "job": self.job,
+                "gone": self.gone}
 
     # ------------------------------------------------------------------ spools
     def spool(self, stock: Any) -> dict[str, Any] | None:
@@ -152,16 +162,41 @@ class Register:
         if "weight" in fields:
             spool["weight"] = self._weight(fields["weight"], "weight")
         if "left" in fields:
-            spool["left"] = self._weight(fields["left"], "weight left")
+            before, spool["left"] = spool["left"], self._weight(fields["left"], "weight left")
+            if before > 0 and spool["left"] <= 0:
+                self._gone(spool, USED_UP)
+            elif spool["left"] > 0:
+                self.gone = [g for g in self.gone if g["stock"] != spool["stock"]]  # weighed, and not empty after all
         return spool
 
     def remove(self, stock: Any) -> None:
         spool = self._need(stock)
         self.spools.remove(spool)
+        if not any(g["stock"] == spool["stock"] for g in self.gone):     # one used up already says so
+            self._gone(spool, REMOVED)
         for slot in self.slots.values():
             if slot.get("stock") == spool["stock"]:
                 slot.pop("stock", None)
                 slot.pop("how", None)
+
+    def _take(self, spool: dict[str, Any], used: float) -> None:
+        """Grams off a spool; one that runs out has gone out of stock."""
+        before = spool["left"]
+        spool["left"] = round(max(0.0, before - used), 1)
+        if before > 0 and spool["left"] <= 0:
+            self._gone(spool, USED_UP)
+
+    def _gone(self, spool: dict[str, Any], why: str) -> None:
+        day = self.today()
+        kept = (date.fromisoformat(day) - timedelta(days=GONE_KEEP_DAYS)).isoformat()
+        self.gone = [g for g in self.gone if g["stock"] != spool["stock"] and g["out"] >= kept]
+        self.gone.append({**{k: spool.get(k) for k in ("stock", "brand", "colour", "hex", "type", "weight", "checked_in")},
+                          "out": day, "why": why})
+
+    def gone_since(self, days: int = RECENT_DAYS) -> list[dict[str, Any]]:
+        """The spools gone out of stock in the last days, the latest first."""
+        since = (date.fromisoformat(self.today()) - timedelta(days=days)).isoformat()
+        return sorted((g for g in self.gone if g["out"] > since), key=lambda g: (g["out"], g["stock"]), reverse=True)
 
     def where(self, stock: str) -> str | None:
         return next((label for label, s in self.slots.items() if s.get("stock") == stock), None)
@@ -218,7 +253,7 @@ class Register:
         if not waiting:
             return 0.0
         used = grams(float(waiting.get("mm") or 0), spool["type"])
-        spool["left"] = round(max(0.0, spool["left"] - used), 1)
+        self._take(spool, used)
         return used
 
     def forget(self, label: str) -> float:
@@ -265,7 +300,7 @@ class Register:
             spool = self.spool(slot.get("stock")) if slot.get("stock") else None
             if spool is not None:
                 used = grams(mm, spool["type"])
-                spool["left"] = round(max(0.0, spool["left"] - used), 1)
+                self._take(spool, used)
                 booked.append({"slot": label, "stock": spool["stock"], "grams": round(used, 1)})
             else:
                 waiting = self.pending.setdefault(label, {"mm": 0.0, "type": slot.get("type") or "", "key": slot.get("key")})
