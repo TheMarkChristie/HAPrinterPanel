@@ -238,6 +238,10 @@ class Register:
         if job is None:
             # counted from 0, so a print's first reading (often a few cm already) is booked too
             self.job = job = {"file": file, "last": 0.0, "used": {}}
+        if active and not job.get("active") and UNKNOWN_SLOT in job["used"]:
+            # the printer says which slot only about a minute into a print: what the start (the purge line) used is
+            # the first slot's it names
+            job["used"][active] = round(float(job["used"].get(active) or 0) + job["used"].pop(UNKNOWN_SLOT), 1)
         delta = used_mm - float(job.get("last") or 0)
         if delta > 0:
             where = active or job.get("active") or UNKNOWN_SLOT

@@ -161,6 +161,16 @@ def test_grams_from_a_slot_not_known_go_to_the_number_given_and_the_next_print_a
     assert r.end()[0]["stock"] is None
 
 
+def test_the_start_of_a_print_before_the_printer_names_its_slot_is_that_slots():
+    # as the K2 Plus did on 25 Oct 2026: printing, active slot unknown for the first minute (104 mm), then box_1_slot_3
+    r = f.Register()
+    r.track("tag Robert.gcode", 0, None)
+    r.track("tag Robert.gcode", 104, None)
+    r.track("tag Robert.gcode", 500, "1C")
+    r.track("tag Robert.gcode", 900, "1D")
+    assert r.job["used"] == {"1C": 500.0, "1D": 400.0}
+
+
 def test_grams_from_a_spool_not_in_the_register_can_be_dropped():
     r = f.Register()
     r.check_in("Generic", "Black", "#000000", "PLA", 1000, DAY)
