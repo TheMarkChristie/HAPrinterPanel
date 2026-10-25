@@ -4,6 +4,8 @@ waiting for their stock numbers, a print booked off the spools when it ends, a r
 the printer switched off."""
 from __future__ import annotations
 
+import re
+import zlib
 from typing import Any
 
 import pytest
@@ -131,6 +133,29 @@ async def test_a_spool_in_with_nothing_set_can_be_confirmed_before_the_print(has
     assert _register(hass, entry).spool("F001")["left"] == 990.0 and not _register(hass, entry).pending
 
 
+async def test_while_a_print_counts_the_page_gets_only_its_grams_and_it_is_saved_as_it_goes(
+        hass: HomeAssistant, k2plus, hass_ws_client, hass_storage, monkeypatch) -> None:
+    """Hundreds of spools are not sent every ten seconds; a long print is in storage, not only when it ends."""
+    from custom_components.printer_panel import register
+
+    monkeypatch.setattr(register, "TELL_EVERY", 0)
+    monkeypatch.setattr(register, "SAVE_EVERY", 0)
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    assert (await _ask(client, 2, {"type": "printer_panel/filament/subscribe"}))["success"]
+    assert "spools" in (await client.receive_json())["event"]
+    _set(hass, ACTIVE, "box_1_slot_2")
+    _set(hass, STATUS, "printing", file=FILE, used_material_mm=1000)
+    await hass.async_block_till_done()
+    assert (await client.receive_json())["event"] == {"printing": {"1B": pytest.approx(1000 * GRAMS_PER_MM, abs=0.05)}}
+    assert hass_storage[f"{DOMAIN}.{entry.entry_id}.filament"]["data"]["job"]["last"] == 1000
+    _set(hass, STATUS, "completed", file=FILE, used_material_mm=1000)
+    await hass.async_block_till_done()
+    told = (await client.receive_json())["event"]
+    assert "spools" in told and told["pending"] == {"1B": pytest.approx(1000 * GRAMS_PER_MM, abs=0.05)}, "a print booked: all of it"
+
+
 async def test_a_print_under_way_when_home_assistant_restarts_is_taken_up(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
     entry = await _add(hass, k2plus)
     client = await hass_ws_client(hass)
@@ -185,7 +210,8 @@ async def test_the_register_as_a_pdf(hass: HomeAssistant, k2plus, hass_ws_client
         assert answer.status == 200 and answer.content_type == "application/pdf"
         assert answer.headers["Content-Disposition"].startswith('attachment; filename="filament-')
         body = await answer.read()
-        assert body.startswith(b"%PDF-1.4") and all(w in body for w in words), lang
+        text = b"\n".join(zlib.decompress(s) for s in re.findall(rb"/FlateDecode >>\nstream\n(.*?)\nendstream", body, re.S))
+        assert body.startswith(b"%PDF-1.4") and all(w in text for w in words), lang
     assert (await web.get("/api/printer_panel/nope/filament/en.pdf")).status == 404
     path = f"/api/printer_panel/{entry.entry_id}/filament/en.pdf"
     anyone = await hass_client_no_auth()

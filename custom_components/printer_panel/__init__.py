@@ -177,7 +177,8 @@ async def _filament_call(hass: HomeAssistant, connection: websocket_api.ActiveCo
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/filament/subscribe", vol.Optional("entry_id"): str})
 @callback
 def ws_filament_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
-    """The register as the page shows it, now and whenever it changes (at most every ten seconds while a print counts)."""
+    """The register as the page shows it, now and whenever it changes; while a print counts, only its grams so far
+    (at most every ten seconds), so a register of hundreds of spools is not sent again and again."""
     entry = _entry(hass, msg)
     if entry is None:
         connection.send_error(msg["id"], *_NO_PRINTER)
@@ -185,8 +186,8 @@ def ws_filament_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveC
     register = entry.runtime_data.filament
 
     @callback
-    def send() -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], register.view()))
+    def send(full: bool = True) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], register.view(full)))
 
     connection.subscriptions[msg["id"]] = register.listen(send)
     connection.send_result(msg["id"])

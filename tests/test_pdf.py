@@ -1,8 +1,9 @@
 """The filament register's PDF, without Home Assistant: python -m pytest tests -q
 
-Checked as a file (every object where the cross-reference table says, the pages counted) and for its words; it is
-drawn by hand, so tests/render_pdf.py turns it into pictures to look at."""
+Checked as a file (every object where the cross-reference table says, the pages counted) and for its words in the
+inflated pages; it is drawn by hand, so tests/render_pdf.py turns it into pictures to look at."""
 import re
+import zlib
 from datetime import datetime
 
 import _load  # noqa: F401
@@ -29,8 +30,10 @@ def book(spools: int = 3) -> dict:
     return r.to_dict()
 
 
-def check_file(pdf: bytes) -> int:
-    """The file holds together: the header, every object at its offset, startxref at the table. Returns the pages."""
+def made(data: dict, printer: str = "K2Plus-235D & CFS", lang: str = "en") -> tuple[int, bytes, int]:
+    """The PDF checked as a file: (its pages, the pages' drawing operators inflated, its size). The file holds together:
+    the header, every object at its offset, each stream its stated length, startxref at the table."""
+    pdf = register_pdf(data, printer, lang, MADE)
     assert pdf.startswith(b"%PDF-1.4\n") and pdf.rstrip().endswith(b"%%EOF")
     start = int(re.search(rb"startxref\n(\d+)\n", pdf).group(1))
     assert pdf[start:start + 4] == b"xref"
@@ -39,49 +42,57 @@ def check_file(pdf: bytes) -> int:
     assert len(rows) == count - 1
     for n, offset in enumerate(rows, start=1):
         assert pdf[int(offset):].startswith(b"%d 0 obj\n" % n), n
-    for length, body in re.findall(rb"<< /Length (\d+) >>\nstream\n(.*?)\nendstream", pdf, re.S):
-        assert int(length) == len(body)
-    return int(re.search(rb"/Type /Pages /Kids \[[^\]]*\] /Count (\d+)", pdf).group(1))
+    pages = []
+    for m in re.finditer(rb"<< /Length (\d+) /Filter /FlateDecode >>\nstream\n", pdf):
+        body = pdf[m.end():m.end() + int(m.group(1))]
+        assert pdf[m.end() + len(body):].startswith(b"\nendstream")
+        pages.append(zlib.decompress(body))
+    count = int(re.search(rb"/Type /Pages /Kids \[[^\]]*\] /Count (\d+)", pdf).group(1))
+    assert count == len(pages)
+    return count, b"\n".join(pages), len(pdf)
 
 
 def test_the_pdf_holds_the_spools_in_stock_and_what_has_gone():
-    pdf = register_pdf(book(), "K2Plus-235D & CFS", "en", MADE)
-    assert check_file(pdf) == 1
+    pages, text, _ = made(book())
+    assert pages == 1
     for words in (b"(Filament register)", b"K2Plus-235D & CFS \\267 25 October 2026, 20:15", b"(In stock \\(2\\))",
                   b"2 spools in stock, 1.1 kg of filament \\267 1 low \\(10 % or less\\)", b"(F001)", b"(1D)",
                   b"(1 Oct 2026)", b"(1,000)", b"(64)", b"(Gone out of stock in the last 30 days \\(2\\))",
                   b"(Used up)", b"(Removed)", b"(Printer Panel \\267 page 1 of 1)"):
-        assert words in pdf, words
-    assert b"(F002) Tj" in pdf.split(b"Gone out of stock")[1], "used up: under gone, not in stock"
+        assert words in text, words
+    assert b"(F002) Tj" in text.split(b"Gone out of stock")[1], "used up: under gone, not in stock"
 
 
 def test_in_norwegian():
-    pdf = register_pdf(book(), "K2Plus-235D & CFS", "nb", MADE)
-    check_file(pdf)
+    _, text, _ = made(book(), lang="nb")
     for words in (b"(Filamentregister)", b"25. oktober 2026 kl. 20:15", b"(P\\345 lager \\(2\\))", b"(1 000)",
                   b"1,1 kg filament", b"(Brukt opp)", b"(Fjernet)", b"(1. okt 2026)", b"(Printer Panel \\267 side 1 av 1)"):
-        assert words in pdf, words
+        assert words in text, words
 
 
 def test_forty_spools_go_over_two_pages_with_the_headings_again():
-    pdf = register_pdf(book(40), "K2Plus-235D & CFS", "en", MADE)
-    assert check_file(pdf) == 2
-    assert pdf.count(b"(Checked in)") == 3, "the stock table's headings on both pages, and the gone table's"
-    assert b"(Printer Panel \\267 page 2 of 2)" in pdf
+    pages, text, _ = made(book(40))
+    assert pages == 2
+    assert text.count(b"(Checked in)") == 3, "the stock table's headings on both pages, and the gone table's"
+    assert b"(Printer Panel \\267 page 2 of 2)" in text
+
+
+def test_hundreds_of_spools_stay_a_small_file():
+    pages, _, size = made(book(500))
+    assert pages > 10 and size < 200_000, (pages, size)
 
 
 def test_an_empty_register():
-    pdf = register_pdf({}, "K2Plus-235D & CFS", "en", MADE)
-    assert check_file(pdf) == 1
-    assert b"(No spools in stock.)" in pdf and b"(Nothing has gone out of stock in the last 30 days.)" in pdf
+    pages, text, _ = made({})
+    assert pages == 1
+    assert b"(No spools in stock.)" in text and b"(Nothing has gone out of stock in the last 30 days.)" in text
 
 
 def test_long_names_are_cut_to_their_column_and_brackets_kept():
     data = f.Register()
     data.check_in("A very long brand name (imported) that goes on", "Teal", "#2f6f7a", "PLA", 1000, DAY)
-    pdf = register_pdf(data.to_dict(), "K2 (garage)", "en", MADE)
-    check_file(pdf)
-    cut = re.search(rb"\((A very long[^)]*?)\) Tj", pdf.replace(b"\\(", b"[").replace(b"\\)", b"]"))
+    _, text, _ = made(data.to_dict(), printer="K2 (garage)")
+    cut = re.search(rb"\((A very long[^)]*?)\) Tj", text.replace(b"\\(", b"[").replace(b"\\)", b"]"))
     assert cut and cut.group(1).endswith(b"\\205"), "cut, with an ellipsis"
-    assert b"K2 \\(garage\\)" in pdf
+    assert b"K2 \\(garage\\)" in text
     assert 22 < text_width("F001", 9.5, bold=True) < 25

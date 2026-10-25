@@ -8,6 +8,7 @@ integration needs nothing installed for it.
 """
 from __future__ import annotations
 
+import zlib
 from datetime import date, datetime
 from typing import Any
 
@@ -144,8 +145,8 @@ class _Doc:
         ]
         kids = []
         for ops in self.pages:
-            stream = b"\n".join(ops)
-            objects.append(b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream))
+            stream = zlib.compress(b"\n".join(ops), 9)        # a register of hundreds of spools stays small
+            objects.append(b"<< /Length %d /Filter /FlateDecode >>\nstream\n%s\nendstream" % (len(stream), stream))
             objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> "
                            b"/Contents %d 0 R >>" % (W, H, len(objects)))
             kids.append(len(objects))

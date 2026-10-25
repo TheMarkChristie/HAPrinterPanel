@@ -974,7 +974,8 @@
       const msg = { type: "printer_panel/filament/subscribe" };
       if (this._entryId) msg.entry_id = this._entryId;
       const mine = () => msg.entry_id === this._entryId;
-      conn.subscribeMessage((view) => { if (mine()) { this._reg = view; this._filament(); } }, msg)
+      // all of it when the register changes; while a print counts, only its grams so far
+      conn.subscribeMessage((view) => { if (mine()) { this._reg = view.spools ? view : { ...(this._reg || {}), ...view }; this._filament(); } }, msg)
         .then((unsub) => { if (this.isConnected && this._built && mine()) this._unsub = unsub; else this._drop(unsub); })
         .catch(() => { if (mine()) { this._reg = null; this._filament(); } })
         .finally(() => { this._subbing = false; });

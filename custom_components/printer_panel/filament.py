@@ -323,5 +323,14 @@ class Register:
             "spools": [{**s, "slot": self.where(s["stock"])} for s in sorted(self.spools, key=lambda s: s["stock"])],
             "slots": {k: {"stock": v.get("stock"), "how": v.get("how")} for k, v in self.slots.items() if v.get("stock")},
             "pending": {k: round(grams(float(v.get("mm") or 0), slot_type(k) or v.get("type")), 1) for k, v in self.pending.items()},
-            "printing": ({k: round(grams(mm, slot_type(k)), 1) for k, mm in self.job["used"].items()} if self.job else {}),
+            "printing": self.printing(),
         }
+
+    def printing(self) -> dict[str, float]:
+        """The print under way so far, in grams by slot."""
+        def slot_type(label: str) -> str:
+            slot = self.slots.get(label) or {}
+            spool = self.spool(slot.get("stock")) if slot.get("stock") else None
+            return spool["type"] if spool else slot.get("type") or ""
+
+        return {k: round(grams(mm, slot_type(k)), 1) for k, mm in self.job["used"].items()} if self.job else {}

@@ -25,8 +25,10 @@ _LOGGER = logging.getLogger(__name__)
 STORE_VERSION = 1
 UNDER_WAY = ("printing", "processing", "paused", "self-testing")
 OVER = ("completed", "stopped", "error", "idle")
-SAVE_DELAY = 10.0       # seconds: a print's count changes every few seconds, storage need not
-TELL_EVERY = 10.0       # and the page is told at most this often while it does
+SAVE_DELAY = 10.0       # seconds after the register last changed; a print changes it every few seconds, so this waits
+SAVE_EVERY = 300.0      # for the print's end: so while one runs it is also saved at least this often
+TELL_EVERY = 10.0       # and the page is told the print's grams at most this often
+FULL, PRINTING = "full", "printing"   # what changed: the register, or only the print under way
 NOT_THERE = ("unavailable", "unknown")
 
 
@@ -38,9 +40,10 @@ class FilamentRegister:
         self.hass = link.hass
         self.book = self._book({})
         self._store: Store[dict[str, Any]] = Store(self.hass, STORE_VERSION, f"{DOMAIN}.{link.entry.entry_id}.filament")
-        self._listeners: list[Callable[[], None]] = []
+        self._listeners: list[Callable[[bool], None]] = []
         self._unwatch: CALLBACK_TYPE | None = None
         self._told = 0.0
+        self._saved = time.monotonic()
 
     async def async_load(self) -> None:
         self.book = self._book(await self._store.async_load() or {})
@@ -117,18 +120,18 @@ class FilamentRegister:
                 changed |= self.book.slot_seen(label, info)
         status = self.hass.states.get(self.link.map["entities"].get("status") or "")
         if status is not None:
-            changed |= self._status(status)
+            changed |= bool(self._status(status))
         if changed:
             self._save()
-            self._tell(now=True)
+            self._tell()
 
     @callback
     def _changed(self, event: Event[EventStateChangedData]) -> None:
         entity_id, new = event.data["entity_id"], event.data["new_state"]
         if entity_id == self.link.map["entities"].get("status"):
-            if new is not None and self._status(new):
+            if new is not None and (what := self._status(new)):
                 self._save()
-                self._tell()
+                self._tell(full=what == FULL)
             return
         label = next((k for k, v in self._slot_entities().items() if v == entity_id), None)
         if label is None:
@@ -136,16 +139,16 @@ class FilamentRegister:
         info = self.slot_info(new)
         if info is not None and self.book.slot_seen(label, info):
             self._save()
-            self._tell(now=True)
+            self._tell()
 
     def _active(self) -> str | None:
         state = self.hass.states.get(self.link.map["entities"].get("active_slot") or "")
         return slot_label(state.state) if state is not None else None
 
     @callback
-    def _status(self, state: State) -> bool:
+    def _status(self, state: State) -> str | None:
         """The print status: while a print is under way, book its count to the slot printing; when it is over, book the
-        print. True when the register changed."""
+        print. Says what changed: FULL (a print was booked), PRINTING (only the print under way), or None."""
         a = state.attributes
         file = str(a.get("file") or "")
         try:
@@ -153,14 +156,15 @@ class FilamentRegister:
         except (TypeError, ValueError):
             used = None
         if state.state in UNDER_WAY and file and used is not None:
-            self._log(self.book.track(file, used, self._active()))
-            return True
+            booked = self.book.track(file, used, self._active())
+            self._log(booked)
+            return FULL if booked else PRINTING
         if state.state in OVER and self.book.job:
             if used is not None and file == self.book.job.get("file"):
                 self.book.track(file, used, self._active())   # the count the print ended on
             self._log(self.book.end())
-            return True
-        return False
+            return FULL
+        return None
 
     def _log(self, booked: list[dict[str, Any]]) -> None:
         for b in booked:
@@ -173,65 +177,72 @@ class FilamentRegister:
     # ------------------------------------------------------------------ storage and the page
     @callback
     def _save(self) -> None:
-        self._store.async_delay_save(self.book.to_dict, SAVE_DELAY)
+        moment = time.monotonic()
+        overdue = moment - self._saved >= SAVE_EVERY
+        if overdue:
+            self._saved = moment
+        self._store.async_delay_save(self.book.to_dict, 0 if overdue else SAVE_DELAY)
 
     async def _save_now(self) -> None:
+        self._saved = time.monotonic()
         await self._store.async_save(self.book.to_dict())
 
     async def async_remove(self) -> None:
         await self._store.async_remove()
 
     @callback
-    def listen(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
+    def listen(self, listener: Callable[[bool], None]) -> CALLBACK_TYPE:
+        """A page following the register: told full=True when the register changed (then it is sent all of it), False
+        when only the print under way did (then only that, every TELL_EVERY at most)."""
         self._listeners.append(listener)
         return lambda: self._listeners.remove(listener)
 
     @callback
-    def _tell(self, now: bool = False) -> None:
+    def _tell(self, full: bool = True) -> None:
         moment = time.monotonic()
-        if not now and moment - self._told < TELL_EVERY:
+        if not full and moment - self._told < TELL_EVERY:
             return
         self._told = moment
         for listener in list(self._listeners):
-            listener()
+            listener(full)
 
-    def view(self) -> dict[str, Any]:
-        return self.book.view()
+    def view(self, full: bool = True) -> dict[str, Any]:
+        return self.book.view() if full else {"printing": self.book.printing()}
 
     # ------------------------------------------------------------------ what the page asks
     async def check_in(self, brand: Any, colour: Any, hex_: Any, material: Any, weight: Any) -> dict[str, Any]:
         spool = self.book.check_in(brand, colour, hex_, material, weight, self.book.today())
         self._rematch()
         await self._save_now()
-        self._tell(now=True)
+        self._tell()
         return {**spool, "slot": self.book.where(spool["stock"])}
 
     async def update(self, stock: Any, fields: dict[str, Any]) -> dict[str, Any]:
         spool = self.book.update(stock, fields)
         self._rematch()
         await self._save_now()
-        self._tell(now=True)
+        self._tell()
         return {**spool, "slot": self.book.where(spool["stock"])}
 
     async def remove(self, stock: Any) -> None:
         self.book.remove(stock)
         self._rematch()
         await self._save_now()
-        self._tell(now=True)
+        self._tell()
 
     async def confirm(self, label: str, stock: Any) -> float:
         used = self.book.confirm(label, stock)
         if used:
             _LOGGER.info("Printer Panel: %.1f g that slot %s used came off %s", used, label, str(stock).upper())
         await self._save_now()
-        self._tell(now=True)
+        self._tell()
         return used
 
     async def forget(self, label: str) -> float:
         dropped = self.book.forget(label)
         _LOGGER.info("Printer Panel: %.1f g that slot %s used were not from a spool in the register", dropped, label)
         await self._save_now()
-        self._tell(now=True)
+        self._tell()
         return dropped
 
     def _rematch(self) -> None:
