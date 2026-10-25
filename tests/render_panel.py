@@ -273,6 +273,26 @@ const pictures = async () => {
   out(`NFC done: tag dialog open ${tagDlg.open} | spool dialog still open ${spoolDlg.open}`);
   spoolDlg.close(); calls.length = 0;
   out(`money: ${["NOK", "GBP", "EUR"].map((c) => window.__printerPanel.money(1234.5, c, "en")).join(", ")} | nb ${window.__printerPanel.money(9.8, "NOK", "nb")}`);
+  // the colour's name sets the swatch (Mark: F004, Pink, came out grey), and the brands he buys
+  out(`names: ${["Pink", "Rosa", "Matte black", "Pastel pink", "Light pink", "Dark green", "Sunset"].map((n) => `${n} ${window.__printerPanel.colourFromName(n)}`).join(", ")}`);
+  const typeIn = (name, value) => { const el = spoolDlg.querySelector(`[name="${name}"]`); el.value = value; el.dispatchEvent(new Event("input", { bubbles: true })); };
+  q('[data-fil="checkin"]').click(); await wait(20);
+  typeIn("colour", "Pink"); await wait(5);
+  const typedPink = fields(["hex"]);
+  typeIn("hex", "#ff00aa"); typeIn("colour", "Blue"); await wait(5);
+  out(`check in: Pink typed -> ${typedPink} | a swatch picked, then Blue typed -> ${fields(["hex"])} | brands offered: ${[...r.querySelectorAll("#pp-brands option")].map((o) => o.value).filter((b) => ["Generic", "RS Pro", "Clas Ohlson"].includes(b)).join(", ")}`);
+  spoolDlg.close();
+  window.FIL_CB({ ...JSON.parse(JSON.stringify(window.FIL)), spools: [...window.FIL.spools,
+    { stock: "F004", brand: "Polymaker", colour: "Pink", hex: "#808080", type: "PLA", weight: 1000, left: 1000, checked_in: day, slot: null }] }); await wait(20);
+  r.querySelector('.spool[data-stock="F004"] [data-fil="edit"]').click(); await wait(20);
+  out(`F004 saved grey, named Pink: its pencil shows ${fields(["hex"])}`);
+  r.querySelector('.spool[data-stock="F004"] [data-fil="edit"]').click(); await wait(5);
+  spoolDlg.close();
+  r.querySelector('.spool[data-stock="F001"] [data-fil="edit"]').click(); await wait(20);
+  typeIn("colour", "Pink"); await wait(5);
+  out(`F001 (its own colour, #9e007e) renamed Pink: ${fields(["hex"])}`);
+  spoolDlg.close();
+  window.FIL_CB(JSON.parse(JSON.stringify(window.FIL))); await wait(20);
   out(`colour names:${["#9e007e", "#2f6f7a", "#00a3ff", "#c12e1f", "#f4f4f4", "#ff37af"].map((h) => `${h} ${window.__printerPanel.colourName(h, "en")}`).join(", ")} | nb #2f6f7a ${window.__printerPanel.colourName("#2f6f7a", "nb")}`);
   r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
   out(`change F003: "${txt("dialog.spoolform h3")}" | ${fields(["brand", "colour", "hex", "material", "weight", "left"])} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);

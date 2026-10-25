@@ -196,7 +196,9 @@
     return `${n} ${code}`.trim();
   }
   const currencySign = (code) => { const c = String(code || "").toUpperCase(); return KRONER.includes(c) ? "kr" : SYMBOLS[c] || c; };
-  const BRANDS = ["Creality", "Bambu Lab", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture", "Polymaker", "Prusament", "Sunlu"];
+  const BRANDS = ["Creality", "Generic", "Bambu Lab", "Clas Ohlson", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture",
+                  "Polymaker", "Prusament", "RS Pro", "Sunlu"];
+  const NO_COLOUR = "#808080";     // the swatch when no colour is known (the register's too)
   const TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PLA Silk", "PETG", "ABS", "ASA", "TPU", "PLA-CF", "PETG-CF", "PA-CF", "PC", "Nylon"];
   // names for the colour the CFS reads off a spool (it gives only the colour): the nearest wins
   const COLOURS = [
@@ -207,6 +209,26 @@
     ["Blue", "Blå", "#1e5bd8"], ["Navy", "Marineblå", "#1a2a6c"], ["Purple", "Lilla", "#7b2d9b"], ["Magenta", "Magenta", "#c0158a"],
     ["Pink", "Rosa", "#ff69b4"], ["Brown", "Brun", "#7b4a2a"], ["Beige", "Beige", "#e8d8b0"],
   ];
+  // more names a colour typed in can have, for its swatch (not used to name a colour the CFS reads)
+  const MORE_COLOURS = [
+    ["Gray", "Grå", "#808080"], ["Light grey", "Lysegrå", "#c8c8c8"], ["Light blue", "Lyseblå", "#7ec8f0"], ["Dark blue", "Mørkeblå", "#1a3a8a"],
+    ["Light green", "Lysegrønn", "#90d890"], ["Turquoise", "Turkis", "#30c0c0"], ["Violet", "Fiolett", "#8a2be2"], ["Natural", "Natur", "#efe6d2"],
+    ["Transparent", "Gjennomsiktig", "#f4f4f4"], ["Clear", "Klar", "#f4f4f4"], ["Cream", "Krem", "#fffdd0"], ["Olive", "Oliven", "#6b8e23"],
+    ["Mint", "Mint", "#98ff98"], ["Coral", "Korall", "#ff7f50"], ["Peach", "Fersken", "#ffcba4"], ["Bronze", "Bronse", "#cd7f32"],
+    ["Copper", "Kobber", "#b87333"], ["Light pink", "Lyserosa", "#ffb6c1"], ["Hot pink", "Knallrosa", "#ff1493"],
+  ];
+  const NAMED = [...COLOURS, ...MORE_COLOURS].flatMap(([en, nb, hex]) => [[en.toLowerCase(), hex], [nb.toLowerCase(), hex]]);
+  /** a colour's name, in English or Norwegian, to a swatch: "Pink" and "Rosa" -> pink; "Matte black", "Pastel pink":
+   *  the longest colour named in it; anything else -> null */
+  function colourFromName(name) {
+    const text = String(name == null ? "" : name).trim().toLowerCase();
+    if (!text) return null;
+    const exact = NAMED.find(([n]) => n === text);
+    if (exact) return exact[1];
+    const words = ` ${text.replace(/[^a-zæøå]+/g, " ")} `;
+    const found = NAMED.filter(([n]) => words.includes(` ${n} `)).sort((a, b) => b[0].length - a[0].length);
+    return found.length ? found[0][1] : null;
+  }
 
   /** "/mnt/UDISK/printer_data/gcodes/GTA 6 stand - Warden of Bacon_PLA_9h1m52s.gcode" -> "GTA 6 stand - Warden of Bacon" */
   function printName(path) {
@@ -660,7 +682,13 @@
         if (ev.key !== "Enter" || !ev.target.matches) return;
         if (ev.target.matches(".lineinput")) { ev.preventDefault(); this._setLine(); } else if (ev.target.matches(".stepper input")) ev.target.blur();
       });
-      root.addEventListener("input", (ev) => { if (ev.target.matches && ev.target.matches(".find")) this._filament(); });
+      root.addEventListener("input", (ev) => {
+        const t = ev.target;
+        if (!t.matches) return;
+        if (t.matches(".find")) this._filament();
+        else if (t.matches('.spoolform [name="colour"]')) this._nameColour();
+        else if (t.matches('.spoolform [name="hex"]')) this._hexPicked = true;
+      });
       root.addEventListener("submit", (ev) => {
         ev.preventDefault();
         const dlg = ev.target.closest("dialog");
@@ -1322,9 +1350,18 @@
       const v = this._fromCfs(label);
       field("brand").value = v.brand;
       field("colour").value = v.colour;
-      field("hex").value = v.hex || "#808080";
+      field("hex").value = v.hex || NO_COLOUR;
+      this._hexPicked = !!v.hex;      // the colour the CFS read off the spool stays, whatever it is called
       field("material").value = v.type;
       field(v.brand ? "weight" : "brand").focus();
+    }
+
+    /** the colour's name typed in sets the swatch ("Pink", "Rosa", "Matte black"), until a swatch is picked */
+    _nameColour() {
+      const dlg = this.shadowRoot.querySelector("dialog.spoolform");
+      if (!dlg || this._hexPicked) return;
+      const form = dlg.querySelector("form"), hex = colourFromName(form.elements.namedItem("colour").value);
+      if (hex) form.elements.namedItem("hex").value = hex;
     }
 
     /* checking a spool in (from a slot: what the CFS says filled in), or changing one */
@@ -1343,7 +1380,10 @@
       const v = spool || {}, field = (n) => dlg.querySelector("form").elements.namedItem(n);
       field("brand").value = v.brand || "";
       field("colour").value = v.colour || "";
-      field("hex").value = colour(v.hex) || "#808080";
+      field("hex").value = colour(v.hex) || NO_COLOUR;
+      // the swatch follows the colour's name until one is picked; a spool saved grey before it did shows its name's
+      this._hexPicked = !!spool && colour(spool.hex) !== NO_COLOUR;
+      this._nameColour();
       field("material").value = v.type || "";
       field("weight").value = spool ? String(spool.weight) : "1000";
       field("left").value = spool ? String(spool.left) : "";
@@ -1602,5 +1642,5 @@
   });
 
   // for the tests
-  window.__printerPanel = { printName, duration, colour, colourName, money, slotLabel, stockNo, repairSidebarIcons };
+  window.__printerPanel = { printName, duration, colour, colourName, colourFromName, money, slotLabel, stockNo, repairSidebarIcons };
 })();
