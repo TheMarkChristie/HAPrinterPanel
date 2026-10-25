@@ -92,6 +92,19 @@ async def test_a_print_comes_off_the_spools_and_the_unconfirmed_slot_waits_for_i
     assert not unknown["success"] and unknown["error"]["code"] == "not_found"
 
 
+async def test_grams_from_a_spool_not_in_the_register_are_dropped(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    await _print(hass, [(0, "box_1_slot_2"), (3356, "box_1_slot_2")])
+    assert "1B" in _register(hass, entry).pending
+    answer = await _ask(client, 2, {"type": "printer_panel/filament/forget", "slot": "1B"})
+    assert answer["success"] and answer["result"]["dropped"] == 10.0
+    assert not _register(hass, entry).pending and _register(hass, entry).spool("F001")["left"] == 1000.0
+    again = await _ask(client, 3, {"type": "printer_panel/filament/forget", "slot": "1B"})
+    assert not again["success"] and again["error"]["code"] == "not_found"
+
+
 async def test_confirmed_before_a_stopped_print_it_comes_off_at_once(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
     entry = await _add(hass, k2plus)
     client = await hass_ws_client(hass)

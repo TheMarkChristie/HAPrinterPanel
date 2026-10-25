@@ -53,6 +53,21 @@ window.FIL = {
   ],
   slots: { "1D": { stock: "F001", how: "auto" } }, pending: { "1A": 15.2 }, printing: { "1B": 4.1, "1D": 2 },
 };
+// a register of n spools: these three, then a shelf of brands, colours and types, F014 confirmed in 1B
+const many = (n) => {
+  const colours = [["Black", "#000000"], ["White", "#f4f4f4"], ["Grey", "#808080"], ["Red", "#d32020"], ["Blue", "#1e5bd8"],
+                   ["Green", "#2e9e44"], ["Yellow", "#f2c500"], ["Orange", "#f07818"], ["Pink", "#ff37af"], ["Purple", "#9e007e"]];
+  const brands = ["Sunlu", "eSun", "Polymaker", "Elegoo", "Creality"], types = ["PLA", "PLA+", "PETG", "PLA Matte"];
+  const fil = JSON.parse(JSON.stringify(window.FIL));
+  for (let i = fil.spools.length + 1; i <= n; i++) {
+    const [c, h] = colours[i % 10];
+    fil.spools.push({ stock: `F${String(i).padStart(3, "0")}`, brand: brands[i % 5], colour: c, hex: h, type: types[i % 4], weight: 1000,
+                      left: ((i * 137) % 1000) + 20, checked_in: day, slot: i === 14 ? "1B" : null });
+  }
+  if (n >= 14) fil.slots["1B"] = { stock: "F014", how: "confirmed" };
+  return fil;
+};
+if (!CHECK) window.FIL = many(12);
 const filament = (m) => {
   calls.push(`ws ${JSON.stringify(m)}`);
   if (window.WS_REFUSE) throw window.WS_REFUSE;
@@ -178,17 +193,21 @@ const pictures = async () => {
     return `${e.dataset.slot} ${b.hidden ? "-" : b.textContent}${b.classList.contains("due") ? " DUE" : ""}${b.classList.contains("unknown") ? " (dashed)" : ""}`; }).join(" | ");
   out(`slot stock numbers: ${stockButtons()} | 1D says "${r.querySelector('.slot[data-slot="1D"] .stock').title}"`);
   r.querySelector('.slot[data-slot="1D"] .stock').click(); await wait(20);
-  out(`1D: open ${slotDlg.open} "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | number "${slotDlg.querySelector('[name="stock"]').value}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | likely: ${picks()}`);
+  out(`groups: ${[...r.querySelectorAll(".filament .boxhead")].map((e) => e.textContent.trim()).join(" / ")} | find box ${vis(".find")}`);
+  out(`1D: open ${slotDlg.open} "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | number "${slotDlg.querySelector('[name="stock"]').value}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | drop shown ${vis('dialog.slotform [data-fil="forget"]')} | likely: ${picks()}`);
   slotDlg.querySelector('[name="stock"]').value = "2"; slotDlg.querySelector("[data-go]").click(); await wait(30);
   out(`typed 2 -> ${calls.pop()} | open ${slotDlg.open}`);
   r.querySelector('.waiting [data-for="1A"]').click(); await wait(20);
-  out(`1A from its note: "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | likely: ${picks()}`);
+  out(`1A from its note: "${txt("dialog.slotform h3")}" | "${txt(".slothint")}" | clear shown ${vis('dialog.slotform [data-fil="clear"]')} | drop "${txt('dialog.slotform [data-fil="forget"]')}" shown ${vis('dialog.slotform [data-fil="forget"]')} | likely: ${picks()}`);
   slotDlg.querySelector('[name="stock"]').value = "f099"; slotDlg.querySelector("[data-go]").click(); await wait(30);
   out(`f099: "${txt("dialog.slotform .dmsg")}" | asked ${calls.length} | open ${slotDlg.open}`);
   slotDlg.querySelector(".pick").click(); await wait(10);
   out(`picked "${slotDlg.querySelector('[name="stock"]').value}", focus on ${slotDlg.querySelector(":focus") ? slotDlg.querySelector(":focus").textContent.trim() : "-"}`);
   slotDlg.querySelector("[data-go]").click(); await wait(30);
   out(`-> ${calls.pop()} | open ${slotDlg.open}`);
+  r.querySelector('.waiting [data-for="1A"]').click(); await wait(20);
+  slotDlg.querySelector('[data-fil="forget"]').click(); await wait(30);
+  out(`not a register spool -> ${calls.pop()} | open ${slotDlg.open}`);
   q('[data-fil="checkin"]').click(); await wait(20);
   out(`check in: open ${spoolDlg.open} "${txt("dialog.spoolform h3")}" | weight ${spoolDlg.querySelector('[name="weight"]').value} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
   spoolDlg.querySelector("[data-go]").click(); await wait(20);
@@ -227,6 +246,16 @@ const pictures = async () => {
   window.WS_REFUSE = null; spoolDlg.close(); calls.length = 0;
   window.FIL_CB({ ...JSON.parse(JSON.stringify(window.FIL)), slots: { "1A": { stock: "F002", how: "confirmed" }, "1D": { stock: "F001", how: "auto" } }, pending: {}, printing: {} }); await wait(20);
   out(`1A confirmed: waiting ${r.querySelectorAll(".waiting").length} | ${stockButtons()} | F002 "${txt('.spool[data-stock="F002"] small')}"`);
+  const big = many(40);
+  window.FIL_CB(big); await wait(20);
+  out(`40 spools: find box ${vis(".find")} | ${[...r.querySelectorAll(".filament .boxhead")].map((e) => e.textContent.trim()).join(" / ")} | first ${[...r.querySelectorAll(".spool")].slice(0, 3).map((e) => e.dataset.stock).join(",")} | rows ${r.querySelectorAll(".spool").length} | card ${Math.round(q(".filament").getBoundingClientRect().height)} px`);
+  const find = q(".find");
+  const look = async (v) => { find.value = v; find.dispatchEvent(new Event("input", { bubbles: true })); await wait(10);
+    return [...r.querySelectorAll(".spool")].map((e) => e.dataset.stock).join(",") || `"${txt(".spools")}"`; };
+  out(`find "14" -> ${await look("14")} | "f2" -> ${await look("f2")} | "sunlu black" -> ${await look("sunlu black")} | "petg 1b" -> ${await look("petg 1b")} | "zzz" -> ${await look("zzz")}`);
+  await look("polymaker"); window.FIL_CB(big); await wait(20);
+  out(`the register updating while finding keeps it: "${find.value}" -> ${[...r.querySelectorAll(".spool")].map((e) => e.dataset.stock).join(",")}`);
+  await look("");
   window.FIL_CB({ spools: [], slots: {}, pending: {}, printing: {} }); await wait(20);
   out(`no spools: "${txt(".spools")}"`);
   panel._unsubscribe(); window.SUB_FAIL = true; panel._reg = null; panel._subscribe(); await wait(30);

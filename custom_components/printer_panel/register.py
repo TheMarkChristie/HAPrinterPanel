@@ -215,6 +215,13 @@ class FilamentRegister:
         self._tell(now=True)
         return used
 
+    async def forget(self, label: str) -> float:
+        dropped = self.book.forget(label)
+        _LOGGER.info("Printer Panel: %.1f g that slot %s used were not from a spool in the register", dropped, label)
+        await self._save_now()
+        self._tell(now=True)
+        return dropped
+
     def _rematch(self) -> None:
         """A Creality spool checked in (or changed) while it sits in the CFS is matched to its slot at once."""
         for label, entity_id in self._slot_entities().items():

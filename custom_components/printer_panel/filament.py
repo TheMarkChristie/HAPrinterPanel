@@ -218,6 +218,13 @@ class Register:
         spool["left"] = round(max(0.0, spool["left"] - used), 1)
         return used
 
+    def forget(self, label: str) -> float:
+        """What waits on a slot for a stock number, dropped: it came from a spool not in the register. Returns the grams."""
+        waiting = self.pending.pop(label, None)
+        if not waiting:
+            raise RegisterError("not_found", f"Nothing waits on slot {label}")
+        return grams(float(waiting.get("mm") or 0), (self.slots.get(label) or {}).get("type") or waiting.get("type"))
+
     # ------------------------------------------------------------------ prints
     def track(self, file: str, used_mm: float, active: str | None) -> list[dict[str, Any]]:
         """The printer's count of filament used in the print under way, and the slot printing now. A new file, or the

@@ -81,7 +81,9 @@
       fanModel: "Part cooling", fanSide: "Side fan", fanCase: "Case fan", fanOn: (w) => `${w} on or off`, fanLevel: (w) => `${w} speed`,
       failed: (what, why) => `Could not ${what}: ${why}`,
       verbs: { pause: "pause", resume: "resume", stop: "stop", set: "change that", line: "set the pause", checkIn: "check it in",
-               save: "save it", remove: "remove it", confirm: "confirm it" },
+               save: "save it", remove: "remove it", confirm: "confirm it", forget: "drop them" },
+      inCfs: "In the CFS", onShelf: (n) => `On the shelf (${n})`, find: "Find: number, brand, colour or type", noMatch: "No spool matches.",
+      forget: "Not a spool in the register: drop these grams",
       filament: "Filament", checkIn: "Check in", checkInTitle: "Check in a spool", editTitle: (n) => `Spool ${n}`,
       brand: "Brand", colourName: "Colour", colourPick: "Colour of the swatch", type: "Type", weight: "Weight on the label (g)",
       leftG: "Left (g)", save: "Save", remove: "Remove", done: "Done",
@@ -129,7 +131,9 @@
       fanModel: "Delkjøling", fanSide: "Sidevifte", fanCase: "Kabinettvifte", fanOn: (w) => `${w} av eller på`, fanLevel: (w) => `Fart for ${w.toLowerCase()}`,
       failed: (what, why) => `Kunne ikke ${what}: ${why}`,
       verbs: { pause: "sette på pause", resume: "fortsette", stop: "stoppe", set: "endre det", line: "sette pausen",
-               checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den" },
+               checkIn: "sjekke den inn", save: "lagre den", remove: "fjerne den", confirm: "bekrefte den", forget: "glemme dem" },
+      inCfs: "I CFS-en", onShelf: (n) => `På hylla (${n})`, find: "Finn: nummer, merke, farge eller type", noMatch: "Ingen spole passer.",
+      forget: "Ikke en spole i registeret: glem disse grammene",
       filament: "Filament", checkIn: "Sjekk inn", checkInTitle: "Sjekk inn en spole", editTitle: (n) => `Spole ${n}`,
       brand: "Merke", colourName: "Farge", colourPick: "Fargen på prøven", type: "Type", weight: "Vekt på etiketten (g)",
       leftG: "Igjen (g)", save: "Lagre", remove: "Fjern", done: "Ferdig",
@@ -158,6 +162,7 @@
   const GCODE_EXT = /\.(?:gcode|gco|g|bgcode)$/i;
   const ACTIVE = ["printing", "processing", "paused", "self-testing"];
   const UNKNOWN_SLOT = "?";        // the register's name for grams printed while the printer did not say which slot
+  const FIND_FROM = 9;             // spools in the register before the Filament card has a box to find one
   const BRANDS = ["Creality", "Bambu Lab", "Elegoo", "Eryone", "eSun", "Geeetech", "Jayo", "Kingroon", "Overture", "Polymaker", "Prusament", "Sunlu"];
   const TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PLA Silk", "PETG", "ABS", "ASA", "TPU", "PLA-CF", "PETG-CF", "PA-CF", "PC", "Nylon"];
 
@@ -322,7 +327,9 @@
     .waiting span { flex: 1; min-width: 0; }
     .spool { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto 40px; align-items: center; gap: 10px; padding: 8px 0;
              border-top: 1px solid var(--divider-color); }
-    .spool:first-child { border-top: none; }
+    .spool:first-child, .boxhead + .spool { border-top: none; }
+    .find { font: inherit; font-size: 14px; width: 100%; height: 40px; box-sizing: border-box; padding: 0 12px; margin-bottom: 8px;
+            border-radius: 10px; border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
     .spool .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .spool .who b { font-variant-numeric: tabular-nums; margin-right: 8px; }
     .spool small { display: block; color: var(--secondary-text-color); font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
@@ -449,7 +456,9 @@
               <div class="camwrap"></div>
               <ha-card class="filament" hidden><h2>${esc(s.filament)}<span class="aside"><button class="btn small" data-fil="checkin">
                 <ha-icon icon="mdi:plus"></ha-icon>${esc(s.checkIn)}</button></span></h2>
-                <div class="waitlist"></div><div class="spools"></div></ha-card>
+                <div class="waitlist"></div>
+                <input class="find" type="search" autocomplete="off" spellcheck="false" placeholder="${esc(s.find)}" aria-label="${esc(s.find)}" hidden>
+                <div class="spools"></div></ha-card>
             </div>
             <div class="col">
               <ha-card class="job">
@@ -516,7 +525,8 @@
             <div class="fields"><label>${esc(s.stockNo)}<input name="stock" list="pp-stock" autocomplete="off" autocapitalize="characters"
                 spellcheck="false" placeholder="F001"></label>
               <div class="picks"></div>
-              <button type="button" class="linkbtn" data-fil="new">${esc(s.newSpool)}</button></div>
+              <button type="button" class="linkbtn" data-fil="new">${esc(s.newSpool)}</button>
+              <button type="button" class="linkbtn" data-fil="forget">${esc(s.forget)}</button></div>
             <div class="dmsg" role="alert"></div>
             <div class="actions"><button type="button" class="btn" data-fil="clear">${esc(s.clear)}</button>
               <button type="button" class="btn" data-fil="close">${esc(s.cancel)}</button>
@@ -563,6 +573,7 @@
         if (ev.key !== "Enter" || !ev.target.matches) return;
         if (ev.target.matches(".lineinput")) { ev.preventDefault(); this._setLine(); } else if (ev.target.matches(".stepper input")) ev.target.blur();
       });
+      root.addEventListener("input", (ev) => { if (ev.target.matches && ev.target.matches(".find")) this._filament(); });
       root.addEventListener("submit", (ev) => {
         ev.preventDefault();
         const dlg = ev.target.closest("dialog");
@@ -991,14 +1002,28 @@
       if (list.innerHTML !== waitHtml) list.innerHTML = waitHtml;
       const thisPrint = {};
       for (const [label, g] of Object.entries(printing)) if (slots[label] && slots[label].stock) thisPrint[slots[label].stock] = g;
-      const spoolsHtml = reg.spools.length ? reg.spools.map((x) => {
+      // the spools in the CFS first (in slot order), then the shelf by stock number; with many, a box to find one
+      const find = card.querySelector(".find");
+      find.hidden = reg.spools.length < FIND_FROM;
+      if (find.hidden) find.value = "";
+      const words = find.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const found = reg.spools.filter((x) => words.every((w) => stockNo(w) === x.stock
+        || [x.stock, x.brand, x.colour, x.type, x.slot || ""].join(" ").toLowerCase().includes(w)));
+      const inCfs = found.filter((x) => x.slot).sort((a, b) => (a.slot < b.slot ? -1 : a.slot > b.slot ? 1 : 0));
+      const shelf = found.filter((x) => !x.slot);
+      const head = (text) => `<div class="boxhead"><span>${esc(text)}</span></div>`;
+      const row = (x) => {
         const pct = x.weight > 0 ? Math.max(0, Math.min(100, (x.left / x.weight) * 100)) : 0;
         const sub = [x.type, x.slot ? this._slotWhere(x.slot) : "", thisPrint[x.stock] ? s.thisPrint(this._g(thisPrint[x.stock], 1)) : ""];
         return `<div class="spool${pct <= 10 ? " low" : ""}" data-stock="${esc(x.stock)}"><span class="swatch" style="background:${colour(x.hex) || "transparent"}"></span>
           <span class="who"><b>${esc(x.stock)}</b>${esc([x.brand, x.colour].filter(Boolean).join(" "))}<small>${esc(sub.filter(Boolean).join(" · "))}</small></span>
           <span class="grams">${esc(s.gLeft(this._g(x.left)))}<small>${esc(s.ofG(this._g(x.weight)))}</small><span class="mini"><i style="width:${pct}%"></i></span></span>
           <button class="iconbtn" data-fil="edit" data-stock="${esc(x.stock)}" aria-label="${esc(s.editSpool(x.stock))}"><ha-icon icon="mdi:pencil"></ha-icon></button></div>`;
-      }).join("") : `<div class="none">${esc(s.noSpools)}</div>`;
+      };
+      const spoolsHtml = !reg.spools.length ? `<div class="none">${esc(s.noSpools)}</div>`
+        : !found.length ? `<div class="none">${esc(s.noMatch)}</div>`
+        : (inCfs.length ? head(s.inCfs) + inCfs.map(row).join("") : "")
+          + (shelf.length ? (inCfs.length ? head(s.onShelf(shelf.length)) : "") + shelf.map(row).join("") : "");
       const spools = card.querySelector(".spools");
       if (spools.innerHTML !== spoolsHtml) spools.innerHTML = spoolsHtml;
       // what the boxes offer while typing: brands and types known, and the stock numbers in the register
@@ -1022,6 +1047,7 @@
         dlg.querySelector('[name="stock"]').value = t.dataset.stock;
         dlg.querySelector("[data-go]").focus();
       } else if (what === "clear") this._confirmSlot(true);
+      else if (what === "forget") this._forget();
       else if (what === "new") this._newFromSlot();
       else if (what === "remove") this._ask("remove");
       else if (what === "close") { const dlg = t.closest("dialog"); if (dlg) dlg.close(); }
@@ -1059,9 +1085,16 @@
       dlg.querySelector(".picks").innerHTML = this._likely(label, info).slice(0, 4).map((x) => `<button type="button" class="pick" data-fil="pick" data-stock="${esc(x.stock)}">
         <span class="dot" style="background:${colour(x.hex) || "transparent"}"></span>${esc([x.stock, x.brand, x.colour].filter(Boolean).join(" "))}</button>`).join("");
       dlg.querySelector('[data-fil="clear"]').hidden = !held;
+      dlg.querySelector('[data-fil="forget"]').hidden = !waiting;
       this._say(dlg, "");
       dlg.showModal();
       dlg.querySelector('[name="stock"]').focus();
+    }
+
+    /* grams waiting on a slot that came from a spool not in the register: dropped, so the note goes */
+    async _forget() {
+      const dlg = this.shadowRoot.querySelector("dialog.slotform");
+      if (await this._ws({ type: "printer_panel/filament/forget", slot: this._slotOpen }, dlg, "forget")) dlg.close();
     }
 
     /** the spools that could be in a slot, likeliest first: of its type, then nearest its colour; not in another slot, not used up */

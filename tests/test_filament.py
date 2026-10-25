@@ -161,6 +161,20 @@ def test_grams_from_a_slot_not_known_go_to_the_number_given_and_the_next_print_a
     assert r.end()[0]["stock"] is None
 
 
+def test_grams_from_a_spool_not_in_the_register_can_be_dropped():
+    r = f.Register()
+    r.check_in("Generic", "Black", "#000000", "PLA", 1000, DAY)
+    r.slot_seen("1B", BLACK)
+    r.track("a.gcode", 0, "1B")
+    r.track("a.gcode", 3356, "1B")
+    r.end()
+    assert r.forget("1B") == pytest.approx(10.0, abs=0.05)
+    assert r.view()["pending"] == {} and r.spool("F001")["left"] == 1000.0, "no spool loses anything"
+    with pytest.raises(f.RegisterError) as err:
+        r.forget("1B")
+    assert err.value.key == "not_found"
+
+
 def test_an_unknown_stock_number_is_refused_and_an_empty_one_clears():
     r = f.Register()
     r.check_in("Generic", "Black", "#000000", "PLA", 1000, DAY)

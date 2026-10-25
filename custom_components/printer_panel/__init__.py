@@ -111,7 +111,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def register_commands(hass: HomeAssistant) -> None:
     """What the page asks Home Assistant: its printer, where the printer is in its file, and the filament register."""
     for command in (ws_config, ws_position, ws_filament_subscribe, ws_filament_check_in, ws_filament_update,
-                    ws_filament_remove, ws_filament_confirm):
+                    ws_filament_remove, ws_filament_confirm, ws_filament_forget):
         websocket_api.async_register_command(hass, command)
 
 
@@ -227,5 +227,16 @@ async def ws_filament_confirm(hass: HomeAssistant, connection: websocket_api.Act
     that came off it."""
     async def work(register):
         return {"booked": round(await register.confirm(msg["slot"], msg["stock"]), 1)}
+
+    await _filament_call(hass, connection, msg, work)
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/filament/forget", vol.Optional("entry_id"): str,
+                                  vol.Required("slot"): str})
+@websocket_api.async_response
+async def ws_filament_forget(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """What waits on a slot for a stock number came from a spool not in the register: drop it. Answers with the grams."""
+    async def work(register):
+        return {"dropped": round(await register.forget(msg["slot"]), 1)}
 
     await _filament_call(hass, connection, msg, work)

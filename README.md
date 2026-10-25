@@ -98,7 +98,11 @@ While a print runs, the printer's own count of the filament it has used goes to 
 the print ends (finished or stopped), each slot's length comes off its spool in grams (1.75 mm filament at the type's
 density, so about 3 g a metre of PLA). A slot without a stock number keeps its grams waiting, shown on the Filament card,
 until the number is confirmed; if that spool has since left the slot, the grams still go to the number given, without
-putting it back in the slot. Taking a spool out of a slot clears the slot; the printer being off does not.
+putting it back in the slot. Grams from a spool that is not in the register are dropped with **Not a spool in the
+register** on the slot. Taking a spool out of a slot clears the slot; the printer being off does not.
+
+The card lists the spools in the CFS first, in slot order, then the shelf by stock number. With more than eight spools
+it has a box to find one: by number (`14` finds F014), brand, colour, type or slot, every word matching.
 
 Change a spool (or its grams left, after weighing it) with its pencil; **Remove** takes it out of the register. The
 register is kept in Home Assistant's storage, a print under way when Home Assistant restarts is taken up where it was,
