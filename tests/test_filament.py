@@ -389,3 +389,18 @@ def test_a_tagged_spool_is_found_by_the_colour_the_cfs_reads_whatever_its_brand(
     assert (r.slots["1A"].get("stock"), r.slots["1B"].get("stock")) == ("F001", "F002"), "two spools alike, told apart"
     r.slot_seen("1C", {**read, "hex": "#000000"})
     assert "stock" not in r.slots["1C"], "an untagged black spool still waits for its number"
+
+
+def test_a_number_given_while_the_printer_is_off_is_the_spool_the_cfs_then_reads():
+    """Mark, 26 Oct 2026: F005 in 1B with the printer off; the page would not let him put it there."""
+    r = f.Register()
+    r.check_in("Creality", "Gold", "#ffbf00", "PLA+", 1000, DAY)
+    r.confirm("1B", "F001")
+    assert r.slots["1B"] == {"key": None, "type": "", "stock": "F001", "how": "confirmed"}
+    gold = {"loaded": True, "vendor": "Creality", "type": "PLA", "name": "CR-PLA", "hex": "#f2b600", "rfid": "01002", "state": 2}
+    assert r.slot_seen("1B", gold) and r.slots["1B"]["stock"] == "F001", "the printer back on: the spool it reads is F001"
+    assert not r.slot_seen("1B", gold)
+    r.confirm("1A", "F001")
+    r.slots["1A"]["key"] = None
+    r.slots.pop("1B")
+    assert r.slot_seen("1A", {"loaded": False}) and "1A" not in r.slots, "back on and the slot is empty: no spool there"

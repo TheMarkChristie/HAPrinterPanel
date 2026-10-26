@@ -76,6 +76,7 @@
       lower: (w) => `Lower the ${w} target`, raise: (w) => `Raise the ${w} target`, setTarget: (w) => `${w} target`,
       cfs: "CFS", box: (n) => `Box ${n}`, external: "External spool", empty: "Empty", low: "Low", inUse: "In use",
       notSet: "Spool in, not set on the printer", notSetShort: "not set", fromCfs: "From the CFS",
+      slotOff: "Not known: the printer is off", notInCfs: "Not in the CFS",
       uses: "Colours in the print file", remaining: (p) => `${p} % left`,
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
       modes: [["Silent", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -137,6 +138,7 @@
       lower: (w) => `Senk målet for ${w.toLowerCase()}`, raise: (w) => `Øk målet for ${w.toLowerCase()}`, setTarget: (w) => `Mål for ${w.toLowerCase()}`,
       cfs: "CFS", box: (n) => `Boks ${n}`, external: "Ekstern spole", empty: "Tom", low: "Lite igjen", inUse: "I bruk",
       notSet: "Spole i, ikke angitt på skriveren", notSetShort: "ikke angitt", fromCfs: "Fra CFS-en",
+      slotOff: "Ukjent: skriveren er av", notInCfs: "Ikke i CFS-en",
       uses: "Farger i utskriftsfilen", remaining: (p) => `${p} % igjen`,
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
       modes: [["Stille", 50], ["Standard", 100], ["Sport", 130], ["Ludicrous", 160]],
@@ -427,6 +429,8 @@
     .fields input { font: inherit; font-size: 15px; width: 100%; height: 42px; box-sizing: border-box; padding: 0 10px; border-radius: 10px;
                     border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
     .fields input[type=color] { padding: 3px; cursor: pointer; }
+    .fields select { font: inherit; font-size: 15px; width: 100%; height: 42px; box-sizing: border-box; padding: 0 8px; border-radius: 10px;
+                     border: 1px solid var(--divider-color); background: var(--secondary-background-color); color: var(--primary-text-color); }
     .fields .pair { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 8px; align-items: end; }
     .fields .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .picks { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -607,6 +611,7 @@
               <div class="two"><label>${esc(s.weight)}<input name="weight" type="number" inputmode="decimal" min="1" max="10000" step="any"></label>
                 <label data-left>${esc(s.leftG)}<input name="left" type="number" inputmode="decimal" min="0" max="10000" step="any"></label></div>
               <div class="two"><label><span class="plabel"></span><input name="price" type="number" inputmode="decimal" min="0" max="100000" step="any"></label></div>
+              <label data-slotpick>${esc(s.inCfs)}<select name="slot"></select></label>
               <div class="two" data-weigh><label>${esc(s.weighed)}<input name="weighed" type="number" inputmode="decimal" min="0" max="10000" step="any"></label>
                 <label>${esc(s.tare)}<input name="tare" type="number" inputmode="decimal" min="0" max="10000" step="any"></label></div>
             </div>
@@ -970,16 +975,16 @@
         const row = list.querySelector(`.slot[data-slot="${window.CSS && window.CSS.escape ? window.CSS.escape(slot.label) : slot.label}"]`);
         if (!row) continue;
         const r = slot.remaining && this._hass.states[slot.remaining];
-        const { attrs, hex, filament, empty } = this._slotRead(slot);
+        const { attrs, hex, filament, empty, off } = this._slotRead(slot);
         const left = num(r && r.state);
         row.querySelector(".swatch").style.background = hex || "transparent";
-        row.querySelector(".swatch").style.borderStyle = empty ? "dashed" : "solid";
+        row.querySelector(".swatch").style.borderStyle = empty || off ? "dashed" : "solid";
         const inUse = activeLabel ? activeLabel === slot.label : Number(attrs.selected) === 1;
         row.classList.toggle("active", !!inUse);
         const low = !empty && left != null && left <= 10;
         row.classList.toggle("low", low);
         const mat = row.querySelector(".mat");
-        const matHtml = empty ? esc(s.empty)
+        const matHtml = off ? esc(s.slotOff) : empty ? esc(s.empty)
           : `${esc(filament || attrs.name || s.notSet)}${inUse ? `<span class="tag">${esc(s.inUse)}</span>` : ""}<small>${esc([attrs.type, hex].filter(Boolean).join(" · "))}</small>`;
         if (mat.innerHTML !== matHtml) mat.innerHTML = matHtml;
         const leftHtml = empty || left == null ? ""
@@ -991,7 +996,7 @@
         const btn = row.querySelector(".stock");
         const held = reg && (reg.slots || {})[slot.label];
         const used = reg && ((reg.pending || {})[slot.label] || (reg.printing || {})[slot.label]);
-        btn.hidden = !reg || (empty && !held && !used);
+        btn.hidden = !reg || (empty && !off && !held && !used);    // the printer off: any slot can be given its number
         if (!btn.hidden) {
           const spool = held && this._spool(held.stock);
           this._text(btn, held ? held.stock : s.confirm);
@@ -1086,8 +1091,9 @@
       const hex = colour(attrs.color_hex) || colour(c && c.state);
       const filament = f && !["unknown", "unavailable", "", "-", "None"].includes(f.state) ? f.state : null;
       // the CFS's state 1 or more: a spool is in, though nothing may be set for it (no chip, not set on the printer)
-      const held = Number(attrs.state) >= 1 && !(f && f.state === "unavailable");
-      return { attrs, hex, filament, empty: !hex && !filament && !held };
+      const off = !!(f || c) && [f, c].every((x) => !x || x.state === "unavailable");    // the printer off: it cannot say
+      const held = Number(attrs.state) >= 1 && !off;
+      return { attrs, hex, filament, off, empty: !hex && !filament && !held };
     }
 
     _slotInfo(label) {
@@ -1387,6 +1393,7 @@
       field("material").value = v.type || "";
       field("weight").value = spool ? String(spool.weight) : "1000";
       field("left").value = spool ? String(spool.left) : "";
+      this._leftShown = field("left").value;     // sent only if changed: a print may end while this is open
       field("price").value = spool && spool.price != null ? String(spool.price) : "";
       field("weighed").value = "";
       const tares = (this._reg && this._reg.tares) || {};
@@ -1394,6 +1401,12 @@
       dlg.querySelector(".plabel").textContent = s.price(currencySign(this._reg && this._reg.currency) || "kr");
       dlg.querySelector("[data-left]").hidden = !spool;
       dlg.querySelector("[data-weigh]").hidden = !spool;
+      // which slot of the CFS the spool is in: chosen here too, as when the CFS cannot say (the printer off)
+      const labels = [...(this._cfg.boxes || []).flatMap((b) => b.slots), ...(this._cfg.external ? [this._cfg.external] : [])].map((x) => x.label);
+      field("slot").innerHTML = [["", s.notInCfs], ...labels.map((l) => [l, this._slotName(l)])]
+        .map(([value, text]) => `<option value="${esc(value)}">${esc(text)}</option>`).join("");
+      field("slot").value = (spool && spool.slot) || "";
+      dlg.querySelector("[data-slotpick]").hidden = !spool;
       dlg.querySelector('[data-fil="tag"]').hidden = !spool;
       dlg.querySelector('[data-part="edit"]').hidden = false;
       dlg.querySelector('[data-part="done"]').hidden = true;
@@ -1433,9 +1446,13 @@
           Object.assign(msg, { weighed, tare });
         } else {
           if (leftText && !(left >= 0 && left <= 10000)) { no(s.leftRange, "left"); return; }
-          if (leftText) msg.left = left;
+          if (leftText && leftText !== this._leftShown) msg.left = left;
         }
-        if (await this._ws({ type: "printer_panel/filament/update", stock: this._editing, ...msg }, dlg, "save")) dlg.close();
+        if (!(await this._ws({ type: "printer_panel/filament/update", stock: this._editing, ...msg }, dlg, "save"))) return;
+        // the slot chosen: the spool confirmed there, or taken out of the one it was in
+        const was = (this._spool(this._editing) || {}).slot || "", now = field("slot").value;
+        if (now !== was && !(await this._ws({ type: "printer_panel/filament/confirm", slot: now || was, stock: now ? this._editing : null }, dlg, "confirm"))) return;
+        dlg.close();
         return;
       }
       const done = await this._ws({ type: "printer_panel/filament/check_in", ...msg }, dlg, "checkIn");

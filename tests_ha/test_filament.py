@@ -391,3 +391,21 @@ async def test_a_printer_starting_up_does_not_take_a_slots_spool_away(hass: Home
     async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
     await hass.async_block_till_done()
     assert "1D" not in book.slots, "the spool taken out, a minute on"
+
+
+async def test_a_slot_given_its_number_while_the_printer_is_off_keeps_it(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    """Mark, 26 Oct 2026: F005 into 1B with the printer off. The number holds when the printer is back on with a spool
+    in 1B, and goes if 1B is empty."""
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Creality", "Gold", "#ffbf00", "PLA+")
+    gold = {"vendor": "Creality", "type": "PLA", "name": "CR-PLA", "color_hex": "#f2b600", "rfid": "01002", "state": 2, "selected": 0}
+    for entity in (SLOT_B, STATUS, ACTIVE):
+        hass.states.async_set(entity, "unavailable", {})
+    await hass.async_block_till_done()
+    book = _register(hass, entry)
+    book.slots.pop("1B", None)       # as on Norway: the register had nothing for 1B
+    assert (await _ask(client, 2, {"type": "printer_panel/filament/confirm", "slot": "1B", "stock": "F001"}))["success"]
+    hass.states.async_set(SLOT_B, "Creality CR-PLA", gold)
+    await hass.async_block_till_done()
+    assert book.slots["1B"]["stock"] == "F001" and book.slots["1B"]["key"], "back on: the spool in 1B is F001"

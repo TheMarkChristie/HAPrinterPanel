@@ -300,11 +300,15 @@ class Register:
     # ------------------------------------------------------------------ the CFS
     def slot_seen(self, label: str, info: dict[str, Any] | None) -> bool:
         """The CFS's word on a slot ({loaded, vendor, type, name, hex, rfid, state}, or None): a different spool, or
-        none, drops the stock number the slot had, and a Creality spool is matched again. True when something changed."""
+        none, drops the stock number the slot had, and a Creality spool is matched again. A number given while the CFS
+        could not say what was in the slot (the printer off) is the spool it then reads. True when something changed."""
         key = slot_key(info)
         slot = self.slots.get(label) or {}
-        if slot and slot.get("key") == key:
+        if slot and slot.get("key") == key and (key or not slot.get("stock")):
             return False
+        if key and slot.get("stock") and slot.get("key") is None:
+            self.slots[label] = {**slot, "key": key, "type": (info or {}).get("type") or ""}
+            return True
         fresh: dict[str, Any] = {"key": key, "type": (info or {}).get("type") or ""} if key else {}
         if key and (stock := self.match(label, info or {})):
             fresh.update(stock=stock, how="auto")

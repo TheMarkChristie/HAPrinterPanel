@@ -292,6 +292,30 @@ const pictures = async () => {
   typeIn("colour", "Pink"); await wait(5);
   out(`F001 (its own colour, #9e007e) renamed Pink: ${fields(["hex"])}`);
   spoolDlg.close();
+  // the slot chosen in the pencil (Mark: F005 in 1B, the printer off, and no way to put it there)
+  calls.length = 0;
+  r.querySelector('.spool[data-stock="F002"] [data-fil="edit"]').click(); await wait(20);
+  const slotPick = spoolDlg.querySelector('[name="slot"]');
+  out(`F002's pencil: in the CFS "${slotPick.value}" of ${[...slotPick.options].map((o) => o.textContent).join(", ")} | shown ${vis("dialog.spoolform [data-slotpick]")}`);
+  slotPick.value = "1B"; spoolDlg.querySelector("[data-go]").click(); await wait(40);
+  out(`F002 put in 1B -> ${calls.map((c) => c.replace(/"brand".*"material":"[^"]*",/, "...,")).join(" then ")} | open ${spoolDlg.open}`);
+  calls.length = 0;
+  r.querySelector('.spool[data-stock="F001"] [data-fil="edit"]').click(); await wait(20);
+  out(`F001's pencil: in the CFS "${slotPick.value}"`);
+  slotPick.value = ""; spoolDlg.querySelector("[data-go]").click(); await wait(40);
+  out(`F001 taken out of the CFS -> ${calls.pop()}`);
+  calls.length = 0;
+  q('[data-fil="checkin"]').click(); await wait(20);
+  out(`check in: slot choice shown ${vis("dialog.spoolform [data-slotpick]")}`);
+  spoolDlg.close();
+  // the printer off: the slots cannot say, and any can be given its number
+  const slotEntities = Object.keys(STATES).filter((k) => /_slot_2_(filament|color)$/.test(k));
+  states = JSON.parse(JSON.stringify(states));
+  for (const k of slotEntities) states[k] = { ...states[k], state: "unavailable", attributes: {} };
+  panel.hass = mk("en"); await wait(20);
+  const rowOff = r.querySelector('.slot[data-slot="1B"]');
+  out(`printer off, 1B: "${rowOff.querySelector(".mat").textContent.trim()}" | stock button ${rowOff.querySelector(".stock").hidden ? "hidden" : `"${rowOff.querySelector(".stock").textContent}"`}`);
+  states = JSON.parse(JSON.stringify(STATES)); panel.hass = mk("en"); await wait(20);
   window.FIL_CB(JSON.parse(JSON.stringify(window.FIL))); await wait(20);
   out(`colour names:${["#9e007e", "#2f6f7a", "#00a3ff", "#c12e1f", "#f4f4f4", "#ff37af"].map((h) => `${h} ${window.__printerPanel.colourName(h, "en")}`).join(", ")} | nb #2f6f7a ${window.__printerPanel.colourName("#2f6f7a", "nb")}`);
   r.querySelector('.spool[data-stock="F003"] [data-fil="edit"]').click(); await wait(20);
