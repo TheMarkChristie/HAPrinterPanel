@@ -98,7 +98,10 @@ The CFS says what is in each slot, and the register follows it:
 
 While a print runs, the printer's own count of the filament it has used goes to the slot printing at that moment. When
 the print ends (finished or stopped), each slot's length comes off its spool in grams (1.75 mm filament at the type's
-density, so about 3 g a metre of PLA). A slot without a stock number keeps its grams waiting, shown on the Filament card,
+density, so about 3 g a metre of PLA). A print that goes wrong is counted once, for what it used: errors, pauses and
+the printer going idle while it recovers do not end it, and when the printer is restarted and resumes (its count jumps
+back up to where it was) the jump adds nothing. A slot's reading must hold for a minute before the register acts on it,
+as a printer starting up says passing things about its slots. A slot without a stock number keeps its grams waiting, shown on the Filament card,
 until the number is confirmed; if that spool has since left the slot, the grams still go to the number given, without
 putting it back in the slot. Grams from a spool that is not in the register are dropped with **Not a spool in the
 register** on the slot. Taking a spool out of a slot clears the slot; the printer being off does not.

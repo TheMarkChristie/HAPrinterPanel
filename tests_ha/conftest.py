@@ -47,6 +47,15 @@ async def _light_setup(hass: HomeAssistant, config: Any) -> bool:
 
 
 @pytest.fixture(autouse=True)
+def slots_at_once(monkeypatch):
+    """A slot's new reading is acted on at once in these tests (on Norway it must hold a minute first); the test of that
+    minute sets it back."""
+    from custom_components.printer_panel import register
+
+    monkeypatch.setattr(register, "SLOT_SETTLE", 0)
+
+
+@pytest.fixture(autouse=True)
 async def light_setup(hass: HomeAssistant, enable_custom_integrations: None):
     integration = await async_get_integration(hass, DOMAIN)
     integration.__dict__["dependencies"] = []          # http, frontend, panel_custom, websocket_api: the harness lacks the frontend

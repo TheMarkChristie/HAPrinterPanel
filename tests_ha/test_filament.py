@@ -327,3 +327,67 @@ async def test_weighed_through_the_page_and_a_tag_found_by_its_colour(hass: Home
                                                   "rfid": "00001", "state": 2, "selected": 0})
     await hass.async_block_till_done()
     assert entry.runtime_data.filament.book.slots["1B"].get("stock") == "F002", "the CFS read the tag: F002, not F001"
+
+
+async def test_a_print_going_wrong_on_norway_comes_off_its_spool_once(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    """26 Oct 2026, tag Robert in 1C: errors, pauses and idles, the printer twice away and back (its count 0, then where
+    it was), stopped at 77,269 mm. It came off the spool four times over; now once, about 230 g."""
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Sunlu", "Black", "#000000")
+    await _ask(client, 2, {"type": "printer_panel/filament/confirm", "slot": "1B", "stock": "F001"})
+    robert = "/mnt/UDISK/printer_data/gcodes/tag Robert_PLA_5h51m22s.gcode"
+    for state, used, slot in (("printing", 0, "unknown"), ("printing", 455, "box_1_slot_2"), ("printing", 74782, "box_1_slot_2"),
+                              ("unavailable", None, "unavailable"), ("printing", 74797, "box_1_slot_2"), ("idle", 75269, "box_1_slot_2"),
+                              ("error", 75338, "box_1_slot_2"), ("unavailable", None, "unavailable"), ("idle", 0, "unknown"),
+                              ("printing", 0, "unknown"), ("printing", 75268, "unknown"), ("error", 75647, "unknown"),
+                              ("paused", 75647, "box_1_slot_2"), ("idle", 75647, "box_1_slot_2"), ("printing", 76022, "box_1_slot_2"),
+                              ("error", 76022, "box_1_slot_2"), ("printing", 76685, "box_1_slot_2"), ("processing", 77267, "unknown"),
+                              ("stopped", 77269, "unknown")):
+        hass.states.async_set(ACTIVE, slot)
+        if used is None:
+            hass.states.async_set(STATUS, state, {})
+        else:
+            hass.states.async_set(STATUS, state, {"file": robert if state != "idle" or used else "", "used_material_mm": used})
+        await hass.async_block_till_done()
+    book = _register(hass, entry)
+    assert book.job is None and not book.pending
+    assert book.spool("F001")["left"] == pytest.approx(1000 - 77269 * GRAMS_PER_MM, abs=0.5)
+    assert book.last_print["grams"] == pytest.approx(77269 * GRAMS_PER_MM, abs=0.5)
+
+
+async def test_a_printer_starting_up_does_not_take_a_slots_spool_away(hass: HomeAssistant, k2plus, hass_ws_client, monkeypatch) -> None:
+    """Restarting, the CFS says passing things about a slot for up to half a minute: unknown, unknown with a spool in,
+    a black Generic PLA. A slot's reading must hold a minute before the register acts on it."""
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.printer_panel import register
+
+    monkeypatch.setattr(register, "SLOT_SETTLE", 60)
+    entry = await _add(hass, k2plus)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))   # a new register learns its slots a minute on
+    await hass.async_block_till_done()
+    client = await hass_ws_client(hass)
+    await _check_in(client, 1, "Creality", "Purple", "#9e007e", "Hyper PLA")
+    book = _register(hass, entry)
+    assert book.slots["1D"]["stock"] == "F001"
+    purple = dict(hass.states.get(SLOT_D).attributes)
+    for state, attributes in (("unknown", {}), ("unknown", {**purple, "vendor": "", "name": "", "color_hex": "", "state": 1}),
+                              ("Generic PLA", {**purple, "vendor": "Generic", "name": "Generic PLA", "color_hex": "#000000", "state": 1}),
+                              ("Creality Hyper PLA", purple)):
+        hass.states.async_set(SLOT_D, state, attributes)
+        await hass.async_block_till_done()
+        async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=20))
+        await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=120))
+    await hass.async_block_till_done()
+    assert book.slots["1D"]["stock"] == "F001", "the purple spool kept its number"
+    hass.states.async_set(SLOT_D, "-", {**purple, "vendor": "", "name": "", "color_hex": "", "state": 0})
+    await hass.async_block_till_done()
+    assert book.slots["1D"]["stock"] == "F001", "not yet: a reading must hold"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=61))
+    await hass.async_block_till_done()
+    assert "1D" not in book.slots, "the spool taken out, a minute on"

@@ -10,7 +10,7 @@ import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, State, callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -24,7 +24,11 @@ _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
 UNDER_WAY = ("printing", "processing", "paused", "self-testing")
-OVER = ("completed", "stopped", "error", "idle")
+# a print is over only when it finished or was stopped: on the K2 Plus error, paused and idle come and go while a
+# print recovers (Norway, 26 Oct 2026: a dozen times in one print), and it prints on afterwards
+OVER = ("completed", "stopped")
+SLOT_SETTLE = 60.0      # seconds a slot's new reading must hold: a printer starting up says passing things about its
+                        # slots for up to half a minute (unknown, a black Generic PLA) before the spool it has
 SAVE_DELAY = 10.0       # seconds after the register last changed; a print changes it every few seconds, so this waits
 SAVE_EVERY = 300.0      # for the print's end: so while one runs it is also saved at least this often
 TELL_EVERY = 10.0       # and the page is told the print's grams at most this often
@@ -44,6 +48,7 @@ class FilamentRegister:
         self._unwatch: CALLBACK_TYPE | None = None
         self._told = 0.0
         self._saved = time.monotonic()
+        self._settling: dict[str, CALLBACK_TYPE] = {}
 
     async def async_load(self) -> None:
         self.book = self._book(await self._store.async_load() or {})
@@ -97,6 +102,9 @@ class FilamentRegister:
         if self._unwatch:
             self._unwatch()
             self._unwatch = None
+        for cancel in self._settling.values():
+            cancel()
+        self._settling.clear()
 
     @callback
     def restart(self) -> None:
@@ -115,10 +123,8 @@ class FilamentRegister:
     @callback
     def _sync(self) -> None:
         changed = False
-        for label, entity_id in self._slot_entities().items():
-            info = self.slot_info(self.hass.states.get(entity_id))
-            if info is not None:
-                changed |= self.book.slot_seen(label, info)
+        for label in self._slot_entities():
+            self._slot_changed(label)
         status = self.hass.states.get(self.link.map["entities"].get("status") or "")
         if status is not None:
             changed |= bool(self._status(status))
@@ -137,7 +143,28 @@ class FilamentRegister:
         label = next((k for k, v in self._slot_entities().items() if v == entity_id), None)
         if label is None:
             return  # the slot printing now: read whenever the count moves
-        info = self.slot_info(new)
+        self._slot_changed(label)
+
+    @callback
+    def _slot_changed(self, label: str) -> None:
+        """A slot's reading changed: acted on once it has held for SLOT_SETTLE (a reading that passes is not a spool)."""
+        if cancel := self._settling.pop(label, None):
+            cancel()
+        if SLOT_SETTLE <= 0:
+            self._slot_settled(label)
+            return
+
+        @callback
+        def settled(_now: Any) -> None:
+            self._settling.pop(label, None)
+            self._slot_settled(label)
+
+        self._settling[label] = async_call_later(self.hass, SLOT_SETTLE, settled)
+
+    @callback
+    def _slot_settled(self, label: str) -> None:
+        entity_id = self._slot_entities().get(label)
+        info = self.slot_info(self.hass.states.get(entity_id)) if entity_id else None
         if info is not None and self.book.slot_seen(label, info):
             self._save()
             self._tell()

@@ -38,6 +38,7 @@ DEFAULT_DENSITY = 1.24
 COLOUR_NEAR = 48            # RGB distance within which a Creality spool's colour is the CFS's
 MAX_WEIGHT = 10000          # g; a 10 kg spool is the largest anyone checks in
 UNKNOWN_SLOT = "?"          # where grams go while the printer does not say which slot is printing
+RESUME_GAP = 1000.0         # mm: a count that jumps back up to within this of the most it reached is a print resuming
 RECENT_DAYS = 30            # "recently" gone out of stock, for the PDF
 GONE_KEEP_DAYS = 365       # how long a spool gone out of stock is remembered
 USED_UP, REMOVED, LOW = "used_up", "removed", "low"
@@ -144,13 +145,14 @@ class Register:
         self.gone: list[dict[str, Any]] = [dict(g) for g in data.get("gone") or []]
         self.tares: dict[str, float] = dict(data.get("tares") or {})      # brand (lower case) -> its empty spool, g
         self.last_print: dict[str, Any] | None = dict(data["last_print"]) if data.get("last_print") else None
+        self.recent: dict[str, Any] | None = dict(data["recent"]) if data.get("recent") else None   # the print last ended: file, high
         self.alerts: list[dict[str, Any]] = []      # spools a print took low or used up, for the phones (not kept)
         self.today: Callable[[], str] = lambda: date.today().isoformat()
         self.now: Callable[[], str] = lambda: datetime.now().isoformat(timespec="minutes")
 
     def to_dict(self) -> dict[str, Any]:
         return {"next": self.next, "spools": self.spools, "slots": self.slots, "pending": self.pending, "job": self.job,
-                "gone": self.gone, "tares": self.tares, "last_print": self.last_print}
+                "gone": self.gone, "tares": self.tares, "last_print": self.last_print, "recent": self.recent}
 
     # ------------------------------------------------------------------ spools
     def spool(self, stock: Any) -> dict[str, Any] | None:
@@ -369,34 +371,50 @@ class Register:
 
     # ------------------------------------------------------------------ prints
     def track(self, file: str, used_mm: float, active: str | None) -> list[dict[str, Any]]:
-        """The printer's count of filament used in the print under way, and the slot printing now. A new file, or the
-        count going back to the start (the same file printed again), ends the print before it. Returns what an ended
-        print booked ([] usually)."""
+        """The printer's count of filament used in the print under way, and the slot printing now. A new file ends the
+        print before it. Returns what an ended print booked ([] usually).
+
+        The count is the print's running total, and only what it adds is booked. Norway's K2 Plus on 26 Oct 2026, a
+        print going wrong: error, paused, idle and printing again a dozen times, and two restarts of the printer. After
+        each the count reads 0 for a moment, then jumps back up to where it was (75 m): that jump is the print resuming
+        and adds nothing; a count climbing from 0 instead is the print started again, and that filament is new."""
         booked: list[dict[str, Any]] = []
         job = self.job
-        if job is not None and (job.get("file") != file or used_mm < float(job.get("last") or 0) - 1.0):
+        if job is not None and job.get("file") != file:
             booked = self.end()
             job = None
         if job is None:
-            # counted from 0, so a print's first reading (often a few cm already) is booked too
-            self.job = job = {"file": file, "last": 0.0, "used": {}}
+            # counted from 0, so a print's first reading (often a few cm already) is booked too; the same file as the
+            # print last ended starts from how far that got, so if it is that print resuming its jump adds nothing
+            recent = self.recent if self.recent and self.recent.get("file") == file else {}
+            self.job = job = {"file": file, "last": 0.0, "high": float(recent.get("high") or 0), "used": {}}
         if active and not job.get("active") and UNKNOWN_SLOT in job["used"]:
             # the printer says which slot only about a minute into a print: what the start (the purge line) used is
             # the first slot's it names
             job["used"][active] = round(float(job["used"].get(active) or 0) + job["used"].pop(UNKNOWN_SLOT), 1)
-        delta = used_mm - float(job.get("last") or 0)
+        last = float(job.get("last") or 0)
+        high = max(float(job.get("high") or 0), last)
+        if used_mm < last:
+            delta = 0.0                         # the count dropped: the printer restarting, or the print starting again
+        elif last < high - RESUME_GAP <= used_mm:
+            delta = max(0.0, used_mm - high)    # back up to where it was: resuming, nothing new
+        else:
+            delta = used_mm - last
         if delta > 0:
             where = active or job.get("active") or UNKNOWN_SLOT
             job["used"][where] = round(float(job["used"].get(where) or 0) + delta, 1)
         if active:
             job["active"] = active
         job["last"] = used_mm
+        job["high"] = max(high, used_mm)
         return booked
 
     def end(self) -> list[dict[str, Any]]:
         """The print is over: each slot's length off its spool, or onto what waits for the slot's stock number. The print
         is the last print: its grams, and what they cost where the spools have a price."""
         job, self.job = self.job, None
+        if job:
+            self.recent = {"file": job.get("file"), "high": max(float(job.get("high") or 0), float(job.get("last") or 0))}
         booked: list[dict[str, Any]] = []
         ended = self.now()
         total = cost = uncosted = 0.0

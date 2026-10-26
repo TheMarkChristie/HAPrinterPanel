@@ -134,13 +134,40 @@ def test_confirmed_before_the_print_it_comes_off_at_the_end():
     assert r.spool("F001")["left"] == 990.0
 
 
-def test_a_new_print_ends_the_one_before_and_the_count_going_back_means_the_same_file_again():
+def test_a_new_print_ends_the_one_before_and_the_same_file_started_again_counts_on():
     r = f.Register()
     r.track("a.gcode", 5000, "1A")
     booked = r.track("b.gcode", 100, "1A")
     assert [b["slot"] for b in booked] == ["1A"] and r.job["file"] == "b.gcode"
-    booked = r.track("b.gcode", 20, "1A")
-    assert booked and r.job["last"] == 20 and r.job["used"] == {"1A": 20.0}
+    assert r.track("b.gcode", 3000, "1A") == []
+    for used in (0, 500, 1500):                          # the same file started again from its beginning: new filament
+        assert r.track("b.gcode", used, "1A") == []
+    assert r.job["used"] == {"1A": 4500.0}
+
+
+def test_a_print_going_wrong_and_resuming_is_counted_once():
+    """Norway's K2 Plus on 26 Oct 2026, tag Robert in Hyper Stardust (1C): 75 m by 02:00, then a dozen errors, pauses
+    and idles, two printer restarts (the count reads 0, then jumps back to where it was), the active slot unknown for a
+    while, and stopped at 77,269 mm. The register booked that 75 m four times over; it is 77,269 mm, once."""
+    r = f.Register()
+    r.check_in("Creality", "Teal", "#2f6f7a", "Hyper Stardust PLA", 1000, DAY)
+    stardust = {"loaded": True, "vendor": "Creality", "type": "PLA", "name": "Hyper Stardust", "hex": "#2f6f7a", "rfid": "01004", "state": 2}
+    r.slot_seen("1C", stardust)
+    file = "tag Robert_PLA_5h51m22s.gcode"
+    steps = [(0, None), (104, None), (455, "1C"), (74782, "1C"), (75269, "1C"),     # error and idle from here: no reading
+             (0, None), (75268, None), (75647, None), (75647, "1C"), (76022, "1C"),  # the printer restarted, resumed
+             (76027, "1C"), (76305, "1C"), (76685, "1C"), (76685, None), (77267, None), (77269, None)]
+    for used, slot in steps:
+        assert r.track(file, used, slot) == []
+    # 77,270: after a restart the printer resumes from its last checkpoint, 1 mm back, and prints that again
+    assert list(r.job["used"]) == ["1C"] and r.job["used"]["1C"] == pytest.approx(77269, abs=5)
+    booked = r.end()                                     # stopped
+    assert booked[0]["stock"] == "F001" and booked[0]["grams"] == pytest.approx(f.grams(77269, "PLA"), abs=0.1)
+    assert r.spool("F001")["left"] == pytest.approx(1000 - f.grams(77269, "PLA"), abs=0.1), "about 230 g, not 1 kg"
+    # the printer comes back with the print it was on, as after a restart: its count jumps back, and adds nothing
+    for used in (0, 77269, 77300):
+        r.track(file, used, "1C")
+    assert r.job["used"] == {"1C": 31.0}
 
 
 def test_grams_waiting_on_a_slot_whose_spool_has_gone_go_to_the_number_given_but_not_into_the_slot():
