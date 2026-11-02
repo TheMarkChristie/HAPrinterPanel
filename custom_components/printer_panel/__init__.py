@@ -4,7 +4,7 @@ the CFS's colours, speed and fans, the light, and Pause, Resume and Stop; and ph
 pauses, runs out of filament or stops with an error. The same view is a card (custom:printer-panel-card). Through the
 printer's Moonraker, two entities of its own on the printer: Count G-code lines, and Pause at G-code line. And a
 filament register: spools checked in with a stock number, matched to the CFS slots, and what each print used taken
-off them, with a PDF of it."""
+off them, with a PDF of it; a spool's label can be read from a photo by the house's AI Task to fill in the check-in."""
 from __future__ import annotations
 
 import copy
@@ -29,6 +29,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_EVENTS, DEFAULT_EVENTS, DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
+from .labelread import NO_AI, read_label
 from .linepause import STORE_VERSION
 from .link import PrinterLink
 from .pdf import register_pdf
@@ -128,7 +129,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 def register_commands(hass: HomeAssistant) -> None:
     """What the page asks Home Assistant: its printer, where the printer is in its file, and the filament register."""
     for command in (ws_config, ws_position, ws_filament_subscribe, ws_filament_check_in, ws_filament_update,
-                    ws_filament_remove, ws_filament_confirm, ws_filament_forget, ws_filament_tag):
+                    ws_filament_remove, ws_filament_confirm, ws_filament_forget, ws_filament_tag, ws_filament_read_label):
         websocket_api.async_register_command(hass, command)
 
 
@@ -271,6 +272,24 @@ async def ws_filament_tag(hass: HomeAssistant, connection: websocket_api.ActiveC
     """What to write on a spool's NFC tag with a phone app: the material, the weight a tag can say, and the tag's own
     colour (the spool's, a few shades off, so the CFS tells the spool from any other)."""
     await _filament_call(hass, connection, msg, lambda r: r.tag(msg["stock"]))
+
+
+@websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/filament/read_label", vol.Optional("entry_id"): str,
+                                  vol.Required("image_id"): vol.Match(r"^[0-9a-f]{32}$"),
+                                  vol.Optional("brands", default=[]): [str], vol.Optional("types", default=[]): [str]})
+@websocket_api.async_response
+async def ws_filament_read_label(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
+    """A spool's label read from a photo the page uploaded: the check-in form's brand, colour, swatch, type and weight,
+    from the house's AI Task entity. Nothing is checked in."""
+    try:
+        fields = await read_label(hass, msg["image_id"], msg["brands"][:200], msg["types"][:200])
+    except LookupError:
+        connection.send_error(msg["id"], NO_AI, "Home Assistant has no AI task to read the photo with")
+        return
+    except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page
+        connection.send_error(msg["id"], "failed", str(err) or type(err).__name__)
+        return
+    connection.send_result(msg["id"], fields)
 
 
 class FilamentPdfView(HomeAssistantView):

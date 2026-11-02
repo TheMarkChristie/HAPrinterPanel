@@ -409,3 +409,34 @@ async def test_a_slot_given_its_number_while_the_printer_is_off_keeps_it(hass: H
     hass.states.async_set(SLOT_B, "Creality CR-PLA", gold)
     await hass.async_block_till_done()
     assert book.slots["1B"]["stock"] == "F001" and book.slots["1B"]["key"], "back on: the spool in 1B is F001"
+
+
+async def test_a_spools_label_read_from_a_photo_fills_the_form_and_checks_nothing_in(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    """0.6.0: the page asks for an uploaded photo to be read; the house's AI Task entity (a stand-in here) is given the
+    photo and the form's brands and types, and what it read comes back tidied. Without an AI Task entity, no_ai."""
+    from homeassistant.core import ServiceCall, SupportsResponse
+
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    image = "0123456789abcdef0123456789abcdef"
+    msg = {"type": f"{DOMAIN}/filament/read_label", "entry_id": entry.entry_id, "image_id": image,
+           "brands": ["eSun", "Creality"], "types": ["PLA+", "Hyper PLA"]}
+    assert (await _ask(client, 1, msg))["error"]["code"] == "no_ai"
+
+    asked: list[dict[str, Any]] = []
+
+    async def generate(call: ServiceCall) -> dict[str, Any]:
+        asked.append(dict(call.data))
+        return {"conversation_id": "x", "data": {"brand": "ESUN", "colour": "fire engine red", "hex": "#C61D2D", "type": "pla+", "weight": 1}}
+
+    hass.states.async_set("ai_task.google_ai_task", "unknown")
+    hass.services.async_register("ai_task", "generate_data", generate, supports_response=SupportsResponse.ONLY)
+    got = await _ask(client, 2, msg)
+    assert got["success"], got
+    assert got["result"] == {"brand": "eSun", "colour": "Fire engine red", "hex": "#c61d2d", "type": "PLA+", "weight": 1000}
+    assert asked[0]["entity_id"] == "ai_task.google_ai_task"
+    assert asked[0]["attachments"] == [{"media_content_id": f"media-source://image_upload/{image}", "media_content_type": "image/jpeg"}]
+    assert "eSun" in asked[0]["instructions"] and set(asked[0]["structure"]) == {"brand", "colour", "hex", "type", "weight"}
+    spools = (await _ask(client, 3, {"type": f"{DOMAIN}/filament/subscribe", "entry_id": entry.entry_id}))
+    assert spools["success"] and not (await client.receive_json())["event"]["spools"]
+    assert (await _ask(client, 4, {**msg, "image_id": "not-an-id"}))["error"]["code"] == "invalid_format"

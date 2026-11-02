@@ -22,7 +22,7 @@ integration supports show whatever they report (no CFS, no CFS card; no chamber,
 | Temperatures | Nozzle, bed and chamber now, with their targets: type one, or step it by 5 °C |
 | CFS | Every slot's colour, material and how much is left (low at 10 % or less), the slot in use, each box's temperature and humidity, the external spool, the colours in the print file, and the stock number of the spool in each slot |
 | Speed and fans | The print speed, stepped by 10 % or one of Silent, Standard, Sport and Ludicrous; part cooling, side and case fans, each a slider and a switch |
-| Filament | The spools checked in, with what each has left, the last print and what it cost, the slots still waiting for a stock number, a PDF, and what to write on an NFC tag |
+| Filament | The spools checked in, with what each has left, the last print and what it cost, the slots still waiting for a stock number, a PDF, and what to write on an NFC tag; a new spool can be filled in from a photo of its label |
 
 The page is drawn once and then only its values change, so the camera keeps playing. It follows the theme and speaks
 English or Norwegian bokmål after the user's language. On a phone the cards stack in one column.
@@ -86,6 +86,14 @@ label. It gets the next stock number, F001, F002 and on (a number is never given
 it on the spool. A spool already in the CFS can be checked in **from the CFS**: pick its slot and the brand (the
 printer's vendor, unless it says Generic), the colour with a name for it, and the type (Creality's product, "Hyper
 Stardust PLA") are filled in from what the CFS reads; checked in, it is that slot's spool.
+
+**From a photo of the label** (0.6.0): on a phone this opens the camera. The photo is made smaller, uploaded to Home
+Assistant and read by the house's AI Task entity (an AI integration that has one, such as Google Generative AI, OpenAI
+or Anthropic). It is given the brands and types the form knows, so a known one keeps its usual spelling ("ESUN" is
+eSun). The brand, the colour's name and its swatch, the type and the weight of filament on the label (1 kg is 1000 g)
+fill the form. A field the label does not show is left as it was, and no maker is guessed. Nothing is checked in until
+**Check in** is pressed, and the photo is deleted from Home Assistant afterwards. Without an AI Task entity the page
+says so. The NFC tag then follows from what was checked in, as before.
 
 The CFS says what is in each slot, and the register follows it:
 

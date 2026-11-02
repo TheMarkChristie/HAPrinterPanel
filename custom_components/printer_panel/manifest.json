@@ -1,7 +1,7 @@
 {
   "domain": "printer_panel",
   "name": "Printer Panel",
-  "after_dependencies": ["ha_creality_ws", "notify", "camera"],
+  "after_dependencies": ["ha_creality_ws", "notify", "camera", "ai_task", "image_upload"],
   "codeowners": ["@TheMarkChristie"],
   "config_flow": true,
   "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
@@ -10,5 +10,5 @@
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/TheMarkChristie/HAPrinterPanel/issues",
   "requirements": [],
-  "version": "0.5.3"
+  "version": "0.6.0"
 }

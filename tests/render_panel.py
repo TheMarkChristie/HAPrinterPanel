@@ -214,7 +214,7 @@ const pictures = async () => {
   slotDlg.querySelector('[data-fil="forget"]').click(); await wait(30);
   out(`not a register spool -> ${calls.pop()} | open ${slotDlg.open}`);
   q('[data-fil="checkin"]').click(); await wait(20);
-  out(`check in: open ${spoolDlg.open} "${txt("dialog.spoolform h3")}" | weight ${spoolDlg.querySelector('[name="weight"]').value} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"`);
+  out(`check in: open ${spoolDlg.open} "${txt("dialog.spoolform h3")}" | weight ${spoolDlg.querySelector('[name="weight"]').value} | left shown ${vis("dialog.spoolform [data-left]")} | remove shown ${vis('dialog.spoolform [data-fil="remove"]')} | button "${txt("dialog.spoolform [data-go]")}"` + ` | from a photo shown ${vis("dialog.spoolform .fromphoto")} "${txt("dialog.spoolform .fromphoto .btn")}"`);
   spoolDlg.querySelector("[data-go]").click(); await wait(20);
   out(`nothing filled in: "${txt("dialog.spoolform .dmsg")}" | asked ${calls.length}`);
   sf("brand", "Polymaker"); sf("colour", "Grey"); sf("hex", "#7a7a7a"); sf("material", "PETG"); sf("weight", "0");
@@ -240,7 +240,7 @@ const pictures = async () => {
   out(`checked in from Ext -> ${calls.slice(-2).join(" then ")} | "${txt(".donehint")}"`);
   spoolDlg.close(); calls.length = 0;
   r.querySelector('.spool[data-stock="F002"] [data-fil="edit"]').click(); await wait(20);
-  out(`changing a spool: from the CFS shown ${vis("dialog.spoolform .fromcfs")}`);
+  out(`changing a spool: from the CFS shown ${vis("dialog.spoolform .fromcfs")} | from a photo shown ${vis("dialog.spoolform .fromphoto")}`);
   spoolDlg.close();
   const realClick = HTMLAnchorElement.prototype.click;
   HTMLAnchorElement.prototype.click = function () { window.DOWNLOAD = `${this.getAttribute("href")} as ${this.download}`; };

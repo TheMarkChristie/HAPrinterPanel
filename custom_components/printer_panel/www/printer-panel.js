@@ -76,6 +76,9 @@
       lower: (w) => `Lower the ${w} target`, raise: (w) => `Raise the ${w} target`, setTarget: (w) => `${w} target`,
       cfs: "CFS", box: (n) => `Box ${n}`, external: "External spool", empty: "Empty", low: "Low", inUse: "In use",
       notSet: "Spool in, not set on the printer", notSetShort: "not set", fromCfs: "From the CFS",
+      fromPhoto: "From a photo of the label", reading: "Reading the label...", readDone: "Filled in from the photo: check it, then check it in.",
+      readNothing: "Nothing could be read from the photo. Try closer, with the label flat and lit.",
+      readFailed: (why) => `The photo could not be read: ${why}`, noAi: "Home Assistant has no AI task to read photos with.",
       slotOff: "Not known: the printer is off", notInCfs: "Not in the CFS",
       uses: "Colours in the print file", remaining: (p) => `${p} % left`,
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
@@ -138,6 +141,9 @@
       lower: (w) => `Senk målet for ${w.toLowerCase()}`, raise: (w) => `Øk målet for ${w.toLowerCase()}`, setTarget: (w) => `Mål for ${w.toLowerCase()}`,
       cfs: "CFS", box: (n) => `Boks ${n}`, external: "Ekstern spole", empty: "Tom", low: "Lite igjen", inUse: "I bruk",
       notSet: "Spole i, ikke angitt på skriveren", notSetShort: "ikke angitt", fromCfs: "Fra CFS-en",
+      fromPhoto: "Fra et bilde av etiketten", reading: "Leser etiketten...", readDone: "Fylt inn fra bildet: sjekk det, og sjekk den inn.",
+      readNothing: "Ingenting kunne leses fra bildet. Prøv nærmere, med etiketten flat og godt lys.",
+      readFailed: (why) => `Bildet kunne ikke leses: ${why}`, noAi: "Home Assistant har ingen AI-oppgave å lese bilder med.",
       slotOff: "Ukjent: skriveren er av", notInCfs: "Ikke i CFS-en",
       uses: "Farger i utskriftsfilen", remaining: (p) => `${p} % igjen`,
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
@@ -440,6 +446,9 @@
     .pick .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--divider-color); box-sizing: border-box; }
     .pick[aria-pressed="true"] { border-color: var(--primary-color); background: color-mix(in srgb, var(--primary-color) 18%, transparent); }
     .fromcfs { margin-bottom: 12px; }
+    .fromphoto { margin-bottom: 12px; }
+    .fromphoto .btn { cursor: pointer; }
+    .fromphoto .btn[aria-disabled="true"] { opacity: 0.5; pointer-events: none; }
     .fromcfs .fromhead { font-size: 13px; color: var(--secondary-text-color); margin-bottom: 6px; }
     .linkbtn { font: inherit; font-size: 14px; justify-self: start; text-align: left; padding: 4px 0; border: none; background: none;
                color: var(--primary-color); cursor: pointer; }
@@ -602,6 +611,8 @@
           </dialog>
           <dialog class="spoolform" aria-labelledby="sf-title"><form novalidate>
             <h3 id="sf-title"></h3>
+            <div class="fromphoto" hidden><label class="btn"><ha-icon icon="mdi:camera"></ha-icon><span>${esc(s.fromPhoto)}</span>
+              <input type="file" accept="image/*" capture="environment" hidden></label></div>
             <div class="fromcfs" hidden><div class="fromhead">${esc(s.fromCfs)}</div><div class="picks"></div></div>
             <div class="fields" data-part="edit">
               <label>${esc(s.brand)}<input name="brand" list="pp-brands" autocomplete="off"></label>
@@ -676,6 +687,7 @@
         const t = ev.target;
         if (t.matches("[data-temp] input")) this._setNumber(`${t.closest("[data-temp]").dataset.temp}_target`, Number(t.value));
         else if (t.matches("[data-speed] input")) this._setNumber("speed", Number(t.value));
+        else if (t.matches(".fromphoto input")) this._readLabel(t);
         else if (t.matches("[data-fan] input[type=range]")) {
           const entity = this._cfg.entities[t.closest("[data-fan]").dataset.fan];
           const pct = Number(t.value);
@@ -1362,6 +1374,49 @@
       field(v.brand ? "weight" : "brand").focus();
     }
 
+    /* checking in from a photo of the spool's label (Mark, 2 Nov 2026: "take a picture of the new filliment and Google ai
+       sets the manufacturer and color"): the photo, made smaller, is uploaded to Home Assistant, read by its AI Task, and
+       what was read fills the form; nothing is checked in until the form is sent. The photo is deleted afterwards. */
+    async _readLabel(input) {
+      const s = this._s, dlg = this.shadowRoot.querySelector("dialog.spoolform"), file = input.files && input.files[0];
+      input.value = "";
+      if (!dlg || !file) return;
+      const field = (n) => dlg.querySelector("form").elements.namedItem(n), btn = dlg.querySelector(".fromphoto .btn");
+      btn.setAttribute("aria-disabled", "true");
+      this._say(dlg, s.reading);
+      let id = null;
+      try {
+        const bitmap = await createImageBitmap(file);
+        const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(bitmap.width * scale);
+        canvas.height = Math.round(bitmap.height * scale);
+        canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.85));
+        const form = new FormData();
+        form.append("file", blob, "printer-panel-label.jpg");
+        const up = await this._hass.fetchWithAuth("/api/image/upload", { method: "POST", body: form });
+        if (!up.ok) throw new Error(`upload ${up.status}`);
+        id = (await up.json()).id;
+        const reg = this._reg || { spools: [] };
+        const known = (list, key) => [...new Set([...list, ...reg.spools.map((x) => x[key])])].filter(Boolean);
+        const msg = { type: "printer_panel/filament/read_label", image_id: id, brands: known(BRANDS, "brand"), types: known(TYPES, "type") };
+        if (this._entryId) msg.entry_id = this._entryId;
+        const got = await this._hass.callWS(msg);
+        if (got.brand) field("brand").value = got.brand;
+        if (got.colour) field("colour").value = got.colour;
+        if (got.type) field("material").value = got.type;
+        if (got.weight) field("weight").value = String(got.weight);
+        if (got.hex) { field("hex").value = got.hex; this._hexPicked = true; } else if (got.colour) { this._hexPicked = false; this._nameColour(); }
+        this._say(dlg, Object.keys(got).length ? s.readDone : s.readNothing);
+      } catch (err) {
+        this._say(dlg, err && err.code === "no_ai" ? s.noAi : s.readFailed((err && err.message) || String(err)));
+      } finally {
+        btn.removeAttribute("aria-disabled");
+        if (id) this._hass.callWS({ type: "image/delete", image_id: id }).catch(() => {});
+      }
+    }
+
     /** the colour's name typed in sets the swatch ("Pink", "Rosa", "Matte black"), until a swatch is picked */
     _nameColour() {
       const dlg = this.shadowRoot.querySelector("dialog.spoolform");
@@ -1379,6 +1434,7 @@
       this._editing = spool ? spool.stock : null;
       this._spoolDone = false;
       this._forSlot = null;
+      dlg.querySelector(".fromphoto").hidden = !!spool;
       const from = dlg.querySelector(".fromcfs"), slots = spool ? [] : this._unregistered();
       from.hidden = !slots.length;
       from.querySelector(".picks").innerHTML = slots.map(({ label, info }) => `<button type="button" class="pick" data-fil="cfs" data-slot="${esc(label)}" aria-pressed="false">
