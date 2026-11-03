@@ -611,8 +611,8 @@
           </dialog>
           <dialog class="spoolform" aria-labelledby="sf-title"><form novalidate>
             <h3 id="sf-title"></h3>
-            <div class="fromphoto" hidden><label class="btn"><ha-icon icon="mdi:camera"></ha-icon><span>${esc(s.fromPhoto)}</span>
-              <input type="file" accept="image/*" capture="environment" hidden></label></div>
+            <div class="fromphoto" hidden><button type="button" class="btn" data-photo="1"><ha-icon icon="mdi:camera"></ha-icon><span>${esc(s.fromPhoto)}</span></button>
+              <input type="file" accept="image/*" capture="environment" hidden></div>
             <div class="fromcfs" hidden><div class="fromhead">${esc(s.fromCfs)}</div><div class="picks"></div></div>
             <div class="fields" data-part="edit">
               <label>${esc(s.brand)}<input name="brand" list="pp-brands" autocomplete="off"></label>
@@ -674,6 +674,7 @@
         if (!t) return;
         if (t.dataset.act) this._act(t.dataset.act);
         else if (t.dataset.dlg) this._dialog(t.dataset.dlg);
+        else if (t.dataset.photo) { const input = t.closest(".fromphoto").querySelector("input"); if (input) input.click(); }
         else if (t.dataset.fil) this._fil(t);
         else if (t.dataset.step) this._nudgeTemp(t.closest("[data-temp]").dataset.temp, Number(t.dataset.step));
         else if (t.dataset.sstep) this._nudgeSpeed(Number(t.dataset.sstep));
@@ -775,6 +776,7 @@
 
     disconnectedCallback() {
       if (this._snapTimer) { clearInterval(this._snapTimer); this._snapTimer = null; }
+      if (this._retry) { clearTimeout(this._retry); this._retry = null; }
       this._stopPos();
       this._unsubscribe();
     }
@@ -1376,7 +1378,8 @@
 
     /* checking in from a photo of the spool's label (Mark, 2 Nov 2026: "take a picture of the new filliment and Google ai
        sets the manufacturer and color"): the photo, made smaller, is uploaded to Home Assistant, read by its AI Task, and
-       what was read fills the form; nothing is checked in until the form is sent. The photo is deleted afterwards. */
+       what was read fills the form; nothing is checked in until the form is sent. The integration deletes the photo on
+       every path (0.6.1), so nothing is deleted from here. */
     async _readLabel(input) {
       const s = this._s, dlg = this.shadowRoot.querySelector("dialog.spoolform"), file = input.files && input.files[0];
       input.value = "";
@@ -1413,7 +1416,6 @@
         this._say(dlg, err && err.code === "no_ai" ? s.noAi : s.readFailed((err && err.message) || String(err)));
       } finally {
         btn.removeAttribute("aria-disabled");
-        if (id) this._hass.callWS({ type: "image/delete", image_id: id }).catch(() => {});
       }
     }
 

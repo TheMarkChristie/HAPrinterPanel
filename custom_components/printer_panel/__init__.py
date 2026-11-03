@@ -21,7 +21,8 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import entity_registry as er
+from homeassistant.exceptions import ConfigEntryError
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
@@ -29,7 +30,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_EVENTS, DEFAULT_EVENTS, DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
-from .labelread import NO_AI, read_label
+from .labelread import NO_AI, TIMEOUT_S, read_label
 from .linepause import STORE_VERSION
 from .link import PrinterLink
 from .pdf import register_pdf
@@ -62,7 +63,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Serve the script once per run; load it on every page, so the card and the Creality icon in the sidebar are there
     from the start; and answer the page's question about its printer."""
     if not hass.data.get(_STATIC):
-        await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, str(WWW), cache_headers=False)])
+        # cached freely: a changed script gets a new URL (the version and a hash of the file)
+        await hass.http.async_register_static_paths([StaticPathConfig(URL_BASE, str(WWW), cache_headers=True)])
         hass.data[_STATIC] = True
         register_commands(hass)
         hass.http.register_view(FilamentPdfView())
@@ -90,6 +92,11 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     link = PrinterLink(hass, entry, _path(hass, entry))
+    if dr.async_get(hass).async_get(link.device_id) is None:
+        # the Creality integration was removed and added again, or its device recreated: an empty page helps nobody
+        raise ConfigEntryError("The Creality printer this Printer page was set up for is no longer in Home Assistant. "
+                               "Open this entry's menu and choose Reconfigure to point it at the printer again; its "
+                               "filament register is kept.")
     entry.runtime_data = link
     # a set-up retried after a failure half way would find its own panel and be refused: clear it first
     frontend.async_remove_panel(hass, link.path, warn_if_unknown=False)
@@ -122,6 +129,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         return False
+    # the register's delayed save is written now, so a reload (every options change) or a stop keeps every change and
+    # the old register can never write over the new one ten seconds later
+    await entry.runtime_data.filament.async_flush()
     frontend.async_remove_panel(hass, entry.runtime_data.path)
     return True
 
@@ -143,11 +153,9 @@ def _entry(hass: HomeAssistant, msg: dict[str, Any]) -> ConfigEntry | None:
 @callback
 def ws_config(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """The printer a page or card shows: the entry it names, else the first."""
-    wanted = msg.get("entry_id")
-    entries = hass.config_entries.async_loaded_entries(DOMAIN)
-    entry = next((e for e in entries if not wanted or e.entry_id == wanted), None)
+    entry = _entry(hass, msg)
     if entry is None:
-        connection.send_error(msg["id"], "not_found", "No printer is set up in Printer Panel")
+        connection.send_error(msg["id"], *_NO_PRINTER)
         return
     connection.send_result(msg["id"], entry.runtime_data.describe())
 
@@ -157,11 +165,9 @@ def ws_config(hass: HomeAssistant, connection: websocket_api.ActiveConnection, m
 async def ws_position(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """Where the printer is in the file it is printing, for the page: the line, of how many, the line it will pause at
     and in about how long. From the printer's Moonraker; available false when it cannot be reached."""
-    wanted = msg.get("entry_id")
-    entries = hass.config_entries.async_loaded_entries(DOMAIN)
-    entry = next((e for e in entries if not wanted or e.entry_id == wanted), None)
+    entry = _entry(hass, msg)
     if entry is None:
-        connection.send_error(msg["id"], "not_found", "No printer is set up in Printer Panel")
+        connection.send_error(msg["id"], *_NO_PRINTER)
         return
     connection.send_result(msg["id"], await entry.runtime_data.line_pause.position())
 
@@ -274,21 +280,38 @@ async def ws_filament_tag(hass: HomeAssistant, connection: websocket_api.ActiveC
     await _filament_call(hass, connection, msg, lambda r: r.tag(msg["stock"]))
 
 
+_LABEL_WORD = vol.All(str, vol.Length(max=60))              # the register keeps a brand or type to 60 characters too
+_LABEL_WORDS = vol.All([_LABEL_WORD], vol.Length(max=200))
+_READING = f"{DOMAIN}_reading_labels"
+
+
 @websocket_api.websocket_command({vol.Required("type"): f"{DOMAIN}/filament/read_label", vol.Optional("entry_id"): str,
                                   vol.Required("image_id"): vol.Match(r"^[0-9a-f]{32}$"),
-                                  vol.Optional("brands", default=[]): [str], vol.Optional("types", default=[]): [str]})
+                                  vol.Optional("brands", default=[]): _LABEL_WORDS, vol.Optional("types", default=[]): _LABEL_WORDS})
 @websocket_api.async_response
 async def ws_filament_read_label(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """A spool's label read from a photo the page uploaded: the check-in form's brand, colour, swatch, type and weight,
-    from the house's AI Task entity. Nothing is checked in."""
+    from the house's preferred AI Task entity. Nothing is checked in. One read at a time per person: it is a metered
+    call, and a page that asks again while one is under way is told to wait."""
+    reading: set[str] = hass.data.setdefault(_READING, set())
+    who = connection.user.id
+    if who in reading:
+        connection.send_error(msg["id"], "busy", "A photo is already being read for you; wait for its answer")
+        return
+    reading.add(who)
     try:
-        fields = await read_label(hass, msg["image_id"], msg["brands"][:200], msg["types"][:200])
+        fields = await read_label(hass, msg["image_id"], msg["brands"], msg["types"])
     except LookupError:
         connection.send_error(msg["id"], NO_AI, "Home Assistant has no AI task to read the photo with")
+        return
+    except TimeoutError:
+        connection.send_error(msg["id"], "failed", f"The AI did not answer within {TIMEOUT_S} s")
         return
     except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page
         connection.send_error(msg["id"], "failed", str(err) or type(err).__name__)
         return
+    finally:
+        reading.discard(who)
     connection.send_result(msg["id"], fields)
 
 

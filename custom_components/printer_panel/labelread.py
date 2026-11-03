@@ -1,22 +1,31 @@
 """A filament spool's label read from a photo, to fill in the check-in form. Mark, 2 Nov 2026: "With the 3d printer can I
 take a picture of the new filliment and Google ai sets the manufacturer and color and tag?"
 
-The page uploads the photo to Home Assistant (/api/image/upload) and asks for it to be read. The house's AI Task entity
-(Google Gemini in Mark's houses) is given the photo and the brands and types the form knows, and asked for the brand,
-the colour's name and the colour itself, the type and the weight of filament on the label. What comes back is tidied
-here into the form's fields: a known brand or type in its usual spelling, the colour as #rrggbb, the weight in grams.
-Nothing is checked in: the form is filled, the person looks, and checks it in as before; the stock number and the NFC
-tag follow from what is saved. The page deletes the photo afterwards. label_fields() needs no Home Assistant (tested
-on its own); read_label() is the call."""
+The page uploads the photo to Home Assistant (/api/image/upload) and asks for it to be read. The house's preferred AI
+Task entity (Settings > Voice assistants > AI tasks; Google Gemini in Mark's houses) is given the photo and the brands
+and types the form knows, and asked for the brand, the colour's name and the colour itself, the type and the weight of
+filament on the label. What comes back is tidied here into the form's fields: a known brand or type in its usual
+spelling, the colour as #rrggbb, the weight in grams. Nothing is checked in: the form is filled, the person looks, and
+checks it in as before; the stock number and the NFC tag follow from what is saved.
+
+The photo is deleted from Home Assistant's image store here, on every path, so a page that was closed, a read that
+failed or one that timed out leaves nothing behind (3 Nov 2026 review: the page used to delete it, best-effort, and only
+an administrator could). The AI is given TIMEOUT_S to answer. label_fields() needs no Home Assistant (tested on its
+own); read_label() is the call."""
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
 from .filament import MAX_WEIGHT, colour_hex
 
+# Home Assistant is imported inside the two calls that need it, so label_fields() stays testable with no Home Assistant
+
 NO_AI = "no_ai"
 TASK = "printer panel spool label"
+TIMEOUT_S = 90                     # a metered call that hangs must not hold the page or the websocket for good
+IMAGE_UPLOAD = "image_upload"      # where Home Assistant keeps the uploaded images' collection in hass.data
 STRUCTURE = {
     "brand": {"description": "The filament's maker, as on the label", "selector": {"text": {}}},
     "colour": {"description": "The colour's name, in English, as on the label if it gives one", "selector": {"text": {}}},
@@ -69,14 +78,40 @@ def label_fields(data: dict[str, Any] | None, brands: list[str], types: list[str
     return out
 
 
+async def forget_image(hass: Any, image_id: str) -> bool:
+    """The uploaded photo out of Home Assistant's image store. False when it was not there (already gone, or the image
+    upload integration is not loaded)."""
+    from homeassistant.helpers.collection import ItemNotFound
+
+    collection = hass.data.get(IMAGE_UPLOAD)
+    if collection is None:
+        return False
+    try:
+        await collection.async_delete_item(image_id)
+    except ItemNotFound:
+        return False
+    return True
+
+
 async def read_label(hass: Any, image_id: str, brands: list[str], types: list[str]) -> dict[str, Any]:
-    """The uploaded photo read by the house's AI Task entity (the first there is), as the form's fields. Raises
-    LookupError(NO_AI) when the house has none."""
-    entities = sorted(hass.states.async_entity_ids("ai_task"))
-    if not entities:
-        raise LookupError(NO_AI)
-    response = await hass.services.async_call("ai_task", "generate_data", {
-        "task_name": TASK, "entity_id": entities[0], "instructions": instructions(brands, types), "structure": STRUCTURE,
-        "attachments": [{"media_content_id": f"media-source://image_upload/{image_id}", "media_content_type": "image/jpeg"}],
-    }, blocking=True, return_response=True)
+    """The uploaded photo read by the house's preferred AI Task entity, as the form's fields. Raises LookupError(NO_AI)
+    when the house has no AI task or no preferred entity, TimeoutError after TIMEOUT_S. The photo is deleted whatever
+    happens."""
+    from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
+
+    try:
+        try:
+            async with asyncio.timeout(TIMEOUT_S):
+                response = await hass.services.async_call("ai_task", "generate_data", {
+                    "task_name": TASK, "instructions": instructions(brands, types), "structure": STRUCTURE,
+                    "attachments": [{"media_content_id": f"media-source://image_upload/{image_id}", "media_content_type": "image/jpeg"}],
+                }, blocking=True, return_response=True)
+        except ServiceNotFound as err:
+            raise LookupError(NO_AI) from err
+        except HomeAssistantError as err:
+            if "no entity_id provided" in str(err).lower() or "no preferred entity" in str(err).lower():
+                raise LookupError(NO_AI) from err
+            raise
+    finally:
+        await forget_image(hass, image_id)
     return label_fields((response or {}).get("data"), brands, types)

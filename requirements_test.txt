@@ -1,0 +1,5 @@
+# The Home Assistant test harness the tests_ha suite runs against (python -m pytest -c tests_ha/pytest.ini tests_ha -q).
+# The offline suite (python -m pytest tests -q) needs only pytest. On Windows the stand-ins in tests_ha/_shims are put
+# on the path by tests_ha/conftest.py; nothing else is needed there.
+homeassistant==2026.2.3
+pytest-homeassistant-custom-component==0.13.316

@@ -429,12 +429,11 @@ async def test_a_spools_label_read_from_a_photo_fills_the_form_and_checks_nothin
         asked.append(dict(call.data))
         return {"conversation_id": "x", "data": {"brand": "ESUN", "colour": "fire engine red", "hex": "#C61D2D", "type": "pla+", "weight": 1}}
 
-    hass.states.async_set("ai_task.google_ai_task", "unknown")
     hass.services.async_register("ai_task", "generate_data", generate, supports_response=SupportsResponse.ONLY)
     got = await _ask(client, 2, msg)
     assert got["success"], got
     assert got["result"] == {"brand": "eSun", "colour": "Fire engine red", "hex": "#c61d2d", "type": "PLA+", "weight": 1000}
-    assert asked[0]["entity_id"] == "ai_task.google_ai_task"
+    assert "entity_id" not in asked[0], "the house's preferred AI Task entity, not one picked here"
     assert asked[0]["attachments"] == [{"media_content_id": f"media-source://image_upload/{image}", "media_content_type": "image/jpeg"}]
     assert "eSun" in asked[0]["instructions"] and set(asked[0]["structure"]) == {"brand", "colour", "hex", "type", "weight"}
     spools = (await _ask(client, 3, {"type": f"{DOMAIN}/filament/subscribe", "entry_id": entry.entry_id}))

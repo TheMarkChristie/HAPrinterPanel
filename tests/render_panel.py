@@ -5,14 +5,19 @@ the bit of hass the page reads, and records every service call; Home Assistant's
 ha-menu-button) are stood in for by plain ones, and without its card helpers the camera is the snapshot fallback. The
 screenshots show the pictures loaded, with the brand images standing in for the camera and the print.
 
-    python tests/render_panel.py   -> the checks printed; tests/render_wide.png and tests/render_phone.png
+    python tests/render_panel.py [--out FOLDER]   -> the checks printed; render_wide.png and render_phone.png (and the
+                                                     pages drawn) in FOLDER, by default printer_panel_render under the
+                                                     temp folder, never beside the sources
 """
 import json
 import os
 import subprocess
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+OUT = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv[:-1] else os.path.join(tempfile.gettempdir(), "printer_panel_render")
+os.makedirs(OUT, exist_ok=True)
 sys.path.insert(0, HERE)
 import _load  # noqa: E402,F401
 from custom_components.printer_panel import printer as p  # noqa: E402
@@ -414,7 +419,7 @@ def chrome(url: str, *args: str) -> str:
 
 
 def run(width: int, height: int, name: str, checks: bool) -> None:
-    html = os.path.join(HERE, f"render_{name}.html")
+    html = os.path.join(OUT, f"render_{name}.html")
     url = "file:///" + html.replace("\\", "/")
     try:
         if checks:
@@ -426,7 +431,7 @@ def run(width: int, height: int, name: str, checks: bool) -> None:
                 text = text.replace(code, char)
             print(text)
         open(html, "w", encoding="utf-8").write(page(width, False))
-        png = os.path.join(HERE, f"render_{name}.png")
+        png = os.path.join(OUT, f"render_{name}.png")
         chrome(url, f"--window-size={width},{height}", f"--screenshot={png}")
         print("screenshot:", png)
     finally:

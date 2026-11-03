@@ -86,6 +86,25 @@ class PrinterPanelConfigFlow(ConfigFlow, domain=DOMAIN):
         }
         return self.async_show_form(step_id="user", data_schema=vol.Schema(schema))
 
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """The page pointed at a printer again: the Creality integration removed and added back gives its printer a new
+        device id, and the entry (its filament register and its settings with it) follows rather than being made anew."""
+        entry = self._get_reconfigure_entry()
+        found = printers(self.hass)
+        if not found:
+            return self.async_abort(reason="no_printer")
+        if user_input is not None:
+            device = str(user_input[CONF_DEVICE])
+            await self.async_set_unique_id(device)
+            if device != entry.unique_id:
+                self._abort_if_unique_id_configured()
+            return self.async_update_reload_and_abort(entry, data_updates={CONF_DEVICE: device}, unique_id=device,
+                                                      title=found.get(device, entry.title))
+        current = entry.data.get(CONF_DEVICE)
+        schema = {vol.Required(CONF_DEVICE, default=current if current in found else next(iter(found))): SelectSelector(SelectSelectorConfig(
+            options=[SelectOptionDict(value=k, label=v) for k, v in found.items()], mode=SelectSelectorMode.DROPDOWN))}
+        return self.async_show_form(step_id="reconfigure", data_schema=vol.Schema(schema), description_placeholders={"name": entry.title})
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:

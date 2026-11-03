@@ -88,12 +88,15 @@ printer's vendor, unless it says Generic), the colour with a name for it, and th
 Stardust PLA") are filled in from what the CFS reads; checked in, it is that slot's spool.
 
 **From a photo of the label** (0.6.0): on a phone this opens the camera. The photo is made smaller, uploaded to Home
-Assistant and read by the house's AI Task entity (an AI integration that has one, such as Google Generative AI, OpenAI
-or Anthropic). It is given the brands and types the form knows, so a known one keeps its usual spelling ("ESUN" is
-eSun). The brand, the colour's name and its swatch, the type and the weight of filament on the label (1 kg is 1000 g)
-fill the form. A field the label does not show is left as it was, and no maker is guessed. Nothing is checked in until
-**Check in** is pressed, and the photo is deleted from Home Assistant afterwards. Without an AI Task entity the page
-says so. The NFC tag then follows from what was checked in, as before.
+Assistant and read by the house's preferred AI Task entity (Settings > Voice assistants > AI tasks; an AI integration
+that has one, such as Google Generative AI, OpenAI or Anthropic). It is given the brands and types the form knows, so a
+known one keeps its usual spelling ("ESUN" is eSun). The brand, the colour's name and its swatch, the type and the
+weight of filament on the label (1 kg is 1000 g) fill the form. A field the label does not show is left as it was, and
+no maker is guessed. Nothing is checked in until **Check in** is pressed. The integration deletes the photo from Home
+Assistant whatever happens (0.6.1: it used to be the page's job, which a closed page or a non-administrator could not
+do), gives the AI 90 seconds, and reads one photo at a time for each person. Without an AI Task entity, or with none
+chosen as preferred, the page says so. The NFC tag then follows from what was checked in, as before. Any signed-in user
+of Home Assistant can change the register and read labels from the page.
 
 The CFS says what is in each slot, and the register follows it:
 
@@ -162,6 +165,11 @@ notifications working. A disabled entity is left off the page. The page asks the
 
 - "No printer found" when adding the integration: the Creality integration is not set up, or its printer has no print
   status entity yet. Set it up and add Printer Panel again.
+- "The Creality printer this Printer page was set up for is no longer in Home Assistant": the Creality integration was
+  removed and added back (or its device recreated), so the printer has a new id. Open the Printer Panel entry's menu
+  and choose **Reconfigure** to point it at the printer again (0.6.1): the filament register and the settings are kept.
+  Do not delete the entry and add it again, which deletes the register. The Pause at G-code line and Count G-code lines
+  entities are made anew for the new printer id.
 - The page says the printer is off: the printer is off or asleep, or Home Assistant cannot reach it. The controls are
   greyed out until it is back.
 - The camera is black or says there is no picture: the camera entity of the Creality integration is unavailable, or
@@ -187,9 +195,13 @@ notifications working. A disabled entity is left off the page. The page asks the
 notification texts, a G-code file's lines) and of the filament register's rules; `python -m pytest -c tests_ha/pytest.ini
 tests_ha -q` sets a printer up in a real Home Assistant and checks the sidebar item, what the page is told, the
 notifications, a renamed entity, the options, counting and Pause at line against a stand-in Moonraker, and the filament
-register through a print, a restart and the printer off (needs `pytest-homeassistant-custom-component`; on
-Windows also stand-ins for `fcntl` and `resource` on the path); `python tests/render_panel.py` draws the page in
-headless Chrome from the K2 Plus fixture, presses every control and screenshots it wide and on a phone;
+register through a print, a restart and the printer off, the label read from a photo on every path, and the entry's
+edges (`pip install -r requirements_test.txt`; on Windows, where Home Assistant does not run, the stand-ins for
+`fcntl` and `resource` in `tests_ha\_shims` are put on the path, and the harness almost runs: set
+`PYTHONPATH=tests_ha\_shims` if its plug-in loads before the tests' own conftest). The workflow in
+`.github/workflows/ci.yml` runs hassfest, the HACS checks and both suites on every push.
+`python tests/render_panel.py [--out FOLDER]` draws the page in headless Chrome from the K2 Plus fixture, presses
+every control and screenshots it wide and on a phone;
 `python tests/render_icons.py` checks the sidebar icon repair against Home Assistant's own icon element;
 `python tests/render_pdf.py` draws the register's PDF with 40 spools and in Norwegian and turns its pages into pictures
 (needs PyMuPDF);

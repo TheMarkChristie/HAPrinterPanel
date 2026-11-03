@@ -1,0 +1,107 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Printer Panel",
+        "description": "En Skriver-side i sidemenyen for en Creality-skriver satt opp med Creality-integrasjonen: kameraet direkte, utskriften, temperaturene, CFS-fargene, hastighet og vifter, lyset, og Pause, Fortsett og Stopp.",
+        "data": {
+          "device_id": "Skriver",
+          "title": "Tittel i sidemenyen",
+          "notify": "Si fra til disse telefonene",
+          "events": "Når"
+        },
+        "data_description": {
+          "notify": "Varslingstjenester: en telefon med Home Assistant-appen er notify.mobile_app_<telefon>.",
+          "events": "Varselet viser et bilde av utskriften; et trykk på det åpner Skriver-siden."
+        }
+      },
+      "reconfigure": {
+        "title": "Printer Panel",
+        "description": "Pek denne Skriver-siden ({name}) på en skriver igjen. Filamentregisteret og innstillingene beholdes.",
+        "data": {
+          "device_id": "Skriver"
+        }
+      }
+    },
+    "abort": {
+      "no_printer": "Fant ingen skriver. Sett opp skriveren med Creality-integrasjonen (ha_creality_ws) først.",
+      "already_configured": "Den skriveren har allerede en Skriver-side.",
+      "reconfigure_successful": "Skriver-siden følger nå den skriveren."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Printer Panel",
+        "data": {
+          "title": "Tittel i sidemenyen",
+          "notify": "Si fra til disse telefonene",
+          "events": "Når"
+        }
+      }
+    }
+  },
+  "selector": {
+    "event": {
+      "options": {
+        "finished": "En utskrift er ferdig",
+        "paused": "En utskrift er satt på pause",
+        "runout": "Filamentet tar slutt",
+        "error": "En utskrift stopper med en feil",
+        "filament_low": "En utskrift gjør en spole nesten tom (10 % eller mindre) eller bruker den opp"
+      }
+    }
+  },
+  "entity": {
+    "number": {
+      "pause_at_line": {
+        "name": "Pause ved G-kode-linje"
+      }
+    },
+    "sensor": {
+      "filament_in_stock": {
+        "name": "Filament på lager"
+      },
+      "spools_in_stock": {
+        "name": "Spoler på lager"
+      },
+      "spools_low": {
+        "name": "Spoler nesten tomme"
+      },
+      "last_print_filament": {
+        "name": "Siste utskrift, filament"
+      },
+      "last_print_filament_cost": {
+        "name": "Siste utskrift, filamentkostnad"
+      }
+    },
+    "switch": {
+      "count_lines": {
+        "name": "Tell G-kode-linjer"
+      }
+    }
+  },
+  "exceptions": {
+    "not_printing": {
+      "message": "Ingenting skrives ut."
+    },
+    "line_beyond": {
+      "message": "Utskriften har {lines} linjer, så det finnes ingen linje {line}."
+    },
+    "line_passed": {
+      "message": "Linje {line} er allerede skrevet ut: skriveren er på linje {at}."
+    },
+    "moonraker_no_host": {
+      "message": "Creality-integrasjonen har ingen adresse for denne skriveren."
+    },
+    "moonraker_unreachable": {
+      "message": "Fikk ikke kontakt med skriverens Moonraker: {detail}"
+    },
+    "moonraker_refused": {
+      "message": "Skriverens Moonraker sa nei: {detail}"
+    },
+    "moonraker_gone": {
+      "message": "Skriverens Moonraker brøt forbindelsen: {detail}"
+    }
+  }
+}

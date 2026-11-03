@@ -6,10 +6,12 @@ slots as they were (its entities are unavailable, which says nothing about the s
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from homeassistant.core import CALLBACK_TYPE, Event, EventStateChangedData, State, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -22,7 +24,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-STORE_VERSION = 1
+STORE_VERSION, STORE_MINOR = 1, 1
 UNDER_WAY = ("printing", "processing", "paused", "self-testing")
 # a print is over only when it finished or was stopped: on the K2 Plus error, paused and idle come and go while a
 # print recovers (Norway, 26 Oct 2026: a dozen times in one print), and it prints on afterwards
@@ -36,6 +38,14 @@ FULL, PRINTING = "full", "printing"   # what changed: the register, or only the 
 NOT_THERE = ("unavailable", "unknown")
 
 
+class FilamentStore(Store[dict[str, Any]]):
+    """The register's storage: written whole and swapped in (atomic_writes), so a stop mid-write cannot leave half a
+    file, with the place for the next shape change."""
+
+    async def _async_migrate_func(self, old_major_version: int, old_minor_version: int, old_data: dict[str, Any]) -> dict[str, Any]:
+        return old_data            # one shape so far (1.1); a change to it goes here, and the page never sees the old one
+
+
 class FilamentRegister:
     """One printer's filament register."""
 
@@ -43,7 +53,8 @@ class FilamentRegister:
         self.link = link
         self.hass = link.hass
         self.book = self._book({})
-        self._store: Store[dict[str, Any]] = Store(self.hass, STORE_VERSION, f"{DOMAIN}.{link.entry.entry_id}.filament")
+        self._store: Store[dict[str, Any]] = FilamentStore(self.hass, STORE_VERSION, f"{DOMAIN}.{link.entry.entry_id}.filament",
+                                                           atomic_writes=True, minor_version=STORE_MINOR)
         self._listeners: list[Callable[[bool], None]] = []
         self._unwatch: CALLBACK_TYPE | None = None
         self._told = 0.0
@@ -51,7 +62,22 @@ class FilamentRegister:
         self._settling: dict[str, CALLBACK_TYPE] = {}
 
     async def async_load(self) -> None:
-        self.book = self._book(await self._store.async_load() or {})
+        try:
+            data = await self._store.async_load()
+        except HomeAssistantError as err:
+            # an unreadable file (half written, not JSON): kept aside for a look, and the register starts empty rather
+            # than the whole printer page failing to set up
+            kept = self._store.path + ".unreadable"
+            _LOGGER.error("Printer Panel: the filament register %s could not be read (%s); it is kept as %s and the register starts empty",
+                          self._store.path, err, kept)
+            await self.hass.async_add_executor_job(os.replace, self._store.path, kept)
+            data = None
+        self.book = self._book(data or {})
+
+    async def async_flush(self) -> None:
+        """Written now, a delayed save cancelled: called as the entry unloads, so a reload or a stop keeps every change."""
+        self._saved = time.monotonic()
+        await self._store.async_save(self.book.to_dict())
 
     @staticmethod
     def _book(data: dict[str, Any]) -> Register:

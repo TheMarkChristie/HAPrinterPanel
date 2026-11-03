@@ -1,5 +1,5 @@
 """Printer Panel against a real Home Assistant (pytest-homeassistant-custom-component). Run from the repository root,
-with a Python that has the harness installed:
+with a Python that has requirements_test.txt installed (Linux, or Windows: see _shims):
 
     python -m pytest -c tests_ha/pytest.ini tests_ha -q
 
@@ -19,6 +19,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+if sys.platform == "win32":
+    # Home Assistant imports fcntl and resource, which Windows has not: the stand-ins in _shims answer instead
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "_shims"))
 # import this repository's custom_components now: the harness's test Home Assistant later puts its own testing_config
 # (a custom_components package of its own) first on the path, and whichever is imported first is the one used
 import custom_components.printer_panel  # noqa: E402,F401

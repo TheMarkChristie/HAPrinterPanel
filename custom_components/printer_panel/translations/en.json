@@ -14,11 +14,19 @@
           "notify": "Notify services: a phone with the Home Assistant app is notify.mobile_app_<phone>.",
           "events": "The notification shows a picture of the print; tapping it opens the Printer page."
         }
+      },
+      "reconfigure": {
+        "title": "Printer Panel",
+        "description": "Point this Printer page ({name}) at a printer again. Its filament register and its settings are kept.",
+        "data": {
+          "device_id": "Printer"
+        }
       }
     },
     "abort": {
       "no_printer": "No printer found. Set the printer up with the Creality integration (ha_creality_ws) first.",
-      "already_configured": "That printer already has a Printer page."
+      "already_configured": "That printer already has a Printer page.",
+      "reconfigure_successful": "The Printer page now follows that printer."
     }
   },
   "options": {
