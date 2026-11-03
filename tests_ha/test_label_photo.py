@@ -1,13 +1,14 @@
 """The label read from a photo, on every path (0.6.1): the photo is deleted from Home Assistant's image store whether
-the read succeeded, failed or timed out; no preferred AI Task entity is no_ai; a second read for the same person while
-one is under way is told to wait; the brand and type lists are bounded."""
+the read succeeded, failed or timed out; no AI Task entity that can read a photo is no_ai, and with none preferred the
+first that can is asked (0.6.2); a busy AI is asked again; a second read for the same person while one is under way is
+told to wait; the brand and type lists are bounded."""
 from __future__ import annotations
 
 import asyncio
 from typing import Any
 
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.collection import ItemNotFound
 
 from custom_components.printer_panel import labelread
@@ -84,8 +85,82 @@ async def test_no_ai_task_and_no_preferred_entity_are_no_ai(hass: HomeAssistant,
         raise HomeAssistantError("No entity_id provided and no preferred entity set")
 
     hass.services.async_register("ai_task", "generate_data", generate, supports_response=SupportsResponse.ONLY)
-    assert (await _ask(client, 2, _msg(entry)))["error"]["code"] == "no_ai", "the house has not chosen an AI task entity"
-    assert not hass.data[labelread.IMAGE_UPLOAD].held, "the photo is deleted on these paths too"
+    images = hass.data[labelread.IMAGE_UPLOAD]
+    images.held.add(IMAGE)
+    assert (await _ask(client, 2, _msg(entry)))["error"]["code"] == "no_ai", "no AI task entity in the house at all"
+    hass.states.async_set("ai_task.text_only", "2026-11-03T12:00:00+00:00", {"supported_features": 1})
+    hass.states.async_set("ai_task.gone", "unavailable", {"supported_features": 7})
+    images.held.add(IMAGE)
+    assert (await _ask(client, 3, _msg(entry)))["error"]["code"] == "no_ai", "text-only and unavailable entities cannot read a photo"
+    assert images.deleted == [IMAGE, IMAGE, IMAGE], "the photo is deleted on each of these paths"
+
+
+async def test_without_a_preferred_entity_the_one_that_reads_photos_is_used(hass: HomeAssistant, k2plus, hass_ws_client) -> None:
+    """Mark's houses had a Gemini AI task but no preferred entity (3 Nov 2026): the page said there was no AI task.
+    The first by id of those that can read a photo and are there; the whole request goes to it; the same from
+    2026.11, where Home Assistant raises the translation key instead of the words."""
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    images = Images(IMAGE)
+    hass.data[labelread.IMAGE_UPLOAD] = images
+    hass.states.async_set("ai_task.aaa_gone", "unavailable", {"supported_features": 7})
+    hass.states.async_set("ai_task.bbb_text_only", "2026-11-03T12:00:00+00:00", {"supported_features": 1})
+    hass.states.async_set("ai_task.google_ai_task", "unknown", {"supported_features": 7})
+    hass.states.async_set("ai_task.zzz_other_reader", "2026-11-03T12:00:00+00:00", {"supported_features": 3})
+    asked: list[dict[str, Any]] = []
+    refusal: list[Exception] = [HomeAssistantError("No entity_id provided and no preferred entity set"),
+                                ServiceValidationError(translation_domain="ai_task", translation_key="no_entity")]
+
+    async def generate(call: ServiceCall) -> dict[str, Any]:
+        asked.append(dict(call.data))
+        if "entity_id" not in call.data:
+            raise refusal[0]
+        return {"data": {"brand": "esun", "type": "pla+", "weight": 1}}
+
+    hass.services.async_register("ai_task", "generate_data", generate, supports_response=SupportsResponse.ONLY)
+    got = await _ask(client, 1, _msg(entry))
+    assert got["success"] and got["result"] == {"brand": "eSun", "type": "PLA+", "weight": 1000}
+    assert len(asked) == 2 and "entity_id" not in asked[0], "the preferred entity is asked first, then one more"
+    assert asked[1] == {**asked[0], "entity_id": "ai_task.google_ai_task"}, "the whole request, to the first that can read a photo"
+    assert images.deleted == [IMAGE]
+
+    refusal.pop(0)                                  # 2026.11: a ServiceValidationError carrying the key, no words
+    images.held.add(IMAGE)
+    got = await _ask(client, 2, _msg(entry))
+    assert got["success"] and len(asked) == 4 and asked[3]["entity_id"] == "ai_task.google_ai_task", got
+
+
+async def test_a_busy_ai_is_asked_again_but_a_failing_one_is_not(hass: HomeAssistant, k2plus, hass_ws_client, monkeypatch) -> None:
+    """Google's 503 "high demand" (3 Nov 2026): three tries, then a plain message; any other failure is told at once."""
+    entry = await _add(hass, k2plus)
+    client = await hass_ws_client(hass)
+    images = Images(IMAGE)
+    hass.data[labelread.IMAGE_UPLOAD] = images
+    monkeypatch.setattr(labelread, "RETRY_WAITS", (0, 0))
+    busy = ('Sorry, I had a problem getting a response from Google Generative AI.: {"error": {"code": 503, '
+            '"message": "This model is currently experiencing high demand.", "status": "UNAVAILABLE"}}')
+    answers: list[Any] = [busy, busy, {"data": {"brand": "Creality"}}, busy, busy, busy, "the model is down"]
+    asked = 0
+
+    async def generate(call: ServiceCall) -> dict[str, Any]:
+        nonlocal asked
+        asked += 1
+        answer = answers.pop(0)
+        if isinstance(answer, str):
+            raise HomeAssistantError(answer)
+        return answer
+
+    hass.services.async_register("ai_task", "generate_data", generate, supports_response=SupportsResponse.ONLY)
+    got = await _ask(client, 1, _msg(entry))
+    assert got["success"] and got["result"] == {"brand": "Creality"} and asked == 3, "busy twice, then read"
+    images.held.add(IMAGE)
+    got = await _ask(client, 2, _msg(entry))
+    assert not got["success"] and got["error"]["code"] == "failed" and asked == 6, "busy three times: given up"
+    assert got["error"]["message"] == "The AI is busy (high demand): try again in a minute", got["error"]
+    images.held.add(IMAGE)
+    got = await _ask(client, 3, _msg(entry))
+    assert not got["success"] and "model is down" in got["error"]["message"] and asked == 7, "a real failure is told at once"
+    assert images.deleted == [IMAGE] * 3, "the photo is deleted on every path"
 
 
 async def test_one_read_at_a_time_per_person(hass: HomeAssistant, k2plus, hass_ws_client) -> None:

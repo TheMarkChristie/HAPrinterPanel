@@ -87,15 +87,17 @@ it on the spool. A spool already in the CFS can be checked in **from the CFS**: 
 printer's vendor, unless it says Generic), the colour with a name for it, and the type (Creality's product, "Hyper
 Stardust PLA") are filled in from what the CFS reads; checked in, it is that slot's spool.
 
-**From a photo of the label** (0.6.0): on a phone this opens the camera. The photo is made smaller, uploaded to Home
-Assistant and read by the house's preferred AI Task entity (Settings > Voice assistants > AI tasks; an AI integration
-that has one, such as Google Generative AI, OpenAI or Anthropic). It is given the brands and types the form knows, so a
+**From a photo of the label** (0.6.0): on a phone this opens the camera (in the Home Assistant Companion app from
+2026.11.1 with the camera allowed; older versions of the app open the picker, so take the photo first). The photo is
+made smaller, uploaded to Home Assistant and read by the house's preferred AI Task entity (Settings > Voice assistants >
+AI tasks) or, with none preferred, by the first AI Task entity that can read a photo (0.6.2; an AI integration that has
+one, such as Google Generative AI, OpenAI or Anthropic). It is given the brands and types the form knows, so a
 known one keeps its usual spelling ("ESUN" is eSun). The brand, the colour's name and its swatch, the type and the
 weight of filament on the label (1 kg is 1000 g) fill the form. A field the label does not show is left as it was, and
 no maker is guessed. Nothing is checked in until **Check in** is pressed. The integration deletes the photo from Home
 Assistant whatever happens (0.6.1: it used to be the page's job, which a closed page or a non-administrator could not
-do), gives the AI 90 seconds, and reads one photo at a time for each person. Without an AI Task entity, or with none
-chosen as preferred, the page says so. The NFC tag then follows from what was checked in, as before. Any signed-in user
+do), gives the AI 90 seconds, and reads one photo at a time for each person. Without an AI Task entity that can read a
+photo, the page says so. The NFC tag then follows from what was checked in, as before. Any signed-in user
 of Home Assistant can change the register and read labels from the page.
 
 The CFS says what is in each slot, and the register follows it:

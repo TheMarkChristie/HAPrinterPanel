@@ -11,7 +11,7 @@
           "events": "Når"
         },
         "data_description": {
-          "notify": "Varslingstjenester: en telefon med Home Assistant-appen er notify.mobile_app_<telefon>.",
+          "notify": "Varslingstjenester: en telefon med Home Assistant-appen er notify.mobile_app_ etterfulgt av telefonens navn.",
           "events": "Varselet viser et bilde av utskriften; et trykk på det åpner Skriver-siden."
         }
       },

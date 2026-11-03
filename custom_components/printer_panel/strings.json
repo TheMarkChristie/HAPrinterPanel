@@ -11,7 +11,7 @@
           "events": "When"
         },
         "data_description": {
-          "notify": "Notify services: a phone with the Home Assistant app is notify.mobile_app_<phone>.",
+          "notify": "Notify services: a phone with the Home Assistant app is notify.mobile_app_ followed by the phone's name.",
           "events": "The notification shows a picture of the print; tapping it opens the Printer page."
         }
       },

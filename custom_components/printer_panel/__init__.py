@@ -22,7 +22,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryError
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.loader import async_get_integration
@@ -30,7 +30,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_EVENTS, DEFAULT_EVENTS, DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
-from .labelread import NO_AI, TIMEOUT_S, read_label
+from .labelread import NO_AI, TIMEOUT_S, is_busy, read_label
 from .linepause import STORE_VERSION
 from .link import PrinterLink
 from .pdf import register_pdf
@@ -38,6 +38,7 @@ from .register import STORE_VERSION as FILAMENT_STORE_VERSION
 
 WWW = Path(__file__).parent / "www"
 PLATFORMS = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)     # set up from its config entries only; nothing in configuration.yaml
 _STATIC = f"{DOMAIN}_static"
 _SCRIPT_URL = f"{DOMAIN}_script_url"
 
@@ -291,8 +292,9 @@ _READING = f"{DOMAIN}_reading_labels"
 @websocket_api.async_response
 async def ws_filament_read_label(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     """A spool's label read from a photo the page uploaded: the check-in form's brand, colour, swatch, type and weight,
-    from the house's preferred AI Task entity. Nothing is checked in. One read at a time per person: it is a metered
-    call, and a page that asks again while one is under way is told to wait."""
+    from the house's preferred AI Task entity or, with none preferred, the first that can read a photo (labelread).
+    Nothing is checked in. One read at a time per person: it is a metered call, and a page that asks again while one
+    is under way is told to wait."""
     reading: set[str] = hass.data.setdefault(_READING, set())
     who = connection.user.id
     if who in reading:
@@ -302,13 +304,14 @@ async def ws_filament_read_label(hass: HomeAssistant, connection: websocket_api.
     try:
         fields = await read_label(hass, msg["image_id"], msg["brands"], msg["types"])
     except LookupError:
-        connection.send_error(msg["id"], NO_AI, "Home Assistant has no AI task to read the photo with")
+        connection.send_error(msg["id"], NO_AI, "Home Assistant has no AI task that can read a photo")
         return
     except TimeoutError:
         connection.send_error(msg["id"], "failed", f"The AI did not answer within {TIMEOUT_S} s")
         return
-    except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page
-        connection.send_error(msg["id"], "failed", str(err) or type(err).__name__)
+    except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page; a busy AI in plain words
+        connection.send_error(msg["id"], "failed",
+                              "The AI is busy (high demand): try again in a minute" if is_busy(err) else (str(err) or type(err).__name__))
         return
     finally:
         reading.discard(who)
