@@ -15,6 +15,7 @@ own); read_label() is the call."""
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from typing import Any
 
@@ -30,6 +31,11 @@ READS_PHOTOS = 1 | 2               # ai_task's AITaskEntityFeature.GENERATE_DATA
 RETRY_WAITS = (5, 15)              # seconds before the second and the third try when the AI is busy: Google's 503 "high demand"
                                    # spikes pass in seconds (3 Nov 2026, Mark's houses), and the 90 s budget covers three tries
 _BUSY = ("high demand", "503", "unavailable", "429", "resource_exhausted", "overloaded")
+# a used-up quota answers 429 too, but it is not a spike: Google says when to try again (a day's quota, for hours), so it
+# is not asked again and is told in Google's words (second review, 3 Nov 2026; a GenerateRequestsPerDay 429 seen in the wild)
+_QUOTA = ("exceeded your current quota", "perday", "per day", "daily quota")
+AI_BUSY = "ai_busy"
+_PREFACE = "Sorry, I had a problem getting a response from Google Generative AI."   # Home Assistant's, before Google's own text
 STRUCTURE = {
     "brand": {"description": "The filament's maker, as on the label", "selector": {"text": {}}},
     "colour": {"description": "The colour's name, in English, as on the label if it gives one", "selector": {"text": {}}},
@@ -135,9 +141,22 @@ async def _generate(hass: Any, call: dict[str, Any]) -> Any:
 
 
 def is_busy(err: BaseException) -> bool:
-    """A failure that is the AI's capacity, not the request: worth another try, and told as such."""
+    """A failure that is the AI's capacity, not the request: worth another try, and told as such. A used-up quota is not."""
     text = str(err).lower()
-    return any(word in text for word in _BUSY)
+    return not any(word in text for word in _QUOTA) and any(word in text for word in _BUSY)
+
+
+def reason(err: BaseException) -> str:
+    """What went wrong, in Google's words where it gave any: Home Assistant's fixed preface taken off, and the message
+    inside Google's JSON when that is what follows (the page showed the JSON before)."""
+    text = str(err).strip()
+    if text.startswith(_PREFACE):
+        text = text[len(_PREFACE):].lstrip(":").strip()
+    try:
+        text = str(json.loads(text)["error"]["message"]) or text
+    except (ValueError, TypeError, KeyError):
+        pass
+    return re.sub(r"\s+", " ", text).strip() or type(err).__name__
 
 
 async def _generate_patiently(hass: Any, call: dict[str, Any]) -> Any:

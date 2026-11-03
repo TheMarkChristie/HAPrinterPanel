@@ -131,7 +131,8 @@ async def test_without_a_preferred_entity_the_one_that_reads_photos_is_used(hass
 
 
 async def test_a_busy_ai_is_asked_again_but_a_failing_one_is_not(hass: HomeAssistant, k2plus, hass_ws_client, monkeypatch) -> None:
-    """Google's 503 "high demand" (3 Nov 2026): three tries, then a plain message; any other failure is told at once."""
+    """Google's 503 "high demand" (3 Nov 2026): three tries, then ai_busy for the page to say in its own language; any
+    other failure, a used-up quota included, is told at once in Google's words."""
     entry = await _add(hass, k2plus)
     client = await hass_ws_client(hass)
     images = Images(IMAGE)
@@ -139,7 +140,10 @@ async def test_a_busy_ai_is_asked_again_but_a_failing_one_is_not(hass: HomeAssis
     monkeypatch.setattr(labelread, "RETRY_WAITS", (0, 0))
     busy = ('Sorry, I had a problem getting a response from Google Generative AI.: {"error": {"code": 503, '
             '"message": "This model is currently experiencing high demand.", "status": "UNAVAILABLE"}}')
-    answers: list[Any] = [busy, busy, {"data": {"brand": "Creality"}}, busy, busy, busy, "the model is down"]
+    quota = ('Sorry, I had a problem getting a response from Google Generative AI.: {"error": {"code": 429, '
+             '"message": "You exceeded your current quota. Please retry in 9h 3m 2s.", "status": "RESOURCE_EXHAUSTED", '
+             '"details": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]}}')
+    answers: list[Any] = [busy, busy, {"data": {"brand": "Creality"}}, busy, busy, busy, "the model is down", quota]
     asked = 0
 
     async def generate(call: ServiceCall) -> dict[str, Any]:
@@ -155,12 +159,16 @@ async def test_a_busy_ai_is_asked_again_but_a_failing_one_is_not(hass: HomeAssis
     assert got["success"] and got["result"] == {"brand": "Creality"} and asked == 3, "busy twice, then read"
     images.held.add(IMAGE)
     got = await _ask(client, 2, _msg(entry))
-    assert not got["success"] and got["error"]["code"] == "failed" and asked == 6, "busy three times: given up"
+    assert not got["success"] and got["error"]["code"] == "ai_busy" and asked == 6, "busy three times: given up, in a code of its own"
     assert got["error"]["message"] == "The AI is busy (high demand): try again in a minute", got["error"]
     images.held.add(IMAGE)
     got = await _ask(client, 3, _msg(entry))
     assert not got["success"] and "model is down" in got["error"]["message"] and asked == 7, "a real failure is told at once"
-    assert images.deleted == [IMAGE] * 3, "the photo is deleted on every path"
+    images.held.add(IMAGE)
+    got = await _ask(client, 4, _msg(entry))
+    assert not got["success"] and got["error"]["code"] == "failed" and asked == 8, "a used-up quota is asked once"
+    assert got["error"]["message"] == "You exceeded your current quota. Please retry in 9h 3m 2s.", "in Google's words, not its JSON"
+    assert images.deleted == [IMAGE] * 4, "the photo is deleted on every path"
 
 
 async def test_one_read_at_a_time_per_person(hass: HomeAssistant, k2plus, hass_ws_client) -> None:

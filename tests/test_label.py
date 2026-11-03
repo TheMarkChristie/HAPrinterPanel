@@ -7,6 +7,27 @@ BRANDS = ["Creality", "Generic", "Bambu Lab", "eSun", "Elegoo", "RS Pro"]
 TYPES = ["PLA", "Hyper PLA", "PLA+", "PLA Matte", "PETG", "TPU"]
 
 
+def _google(code, message, status, extra=""):
+    """A Gemini failure as Home Assistant's Google integration words it (3 Nov 2026): its preface, then Google's JSON."""
+    return (lr._PREFACE + ': {\n  "error": {\n    "code": %d,\n    "message": "%s",\n    "status": "%s"%s\n  }\n}\n'
+            % (code, message, status, extra))
+
+
+def test_a_busy_ai_and_a_used_up_quota_are_told_apart():
+    busy = _google(503, "This model is currently experiencing high demand. Please try again later.", "UNAVAILABLE")
+    quota = _google(429, "You exceeded your current quota, please check your plan and billing details. Please retry in 9h 3m 2s.",
+                    "RESOURCE_EXHAUSTED", ',\n    "details": [{"quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier"}]')
+    gone = _google(404, "This model models/gemini-2.5-flash is no longer available to new users.", "NOT_FOUND")
+    assert lr.is_busy(Exception(busy)), "a 503 spike is worth another try"
+    assert not lr.is_busy(Exception(quota)), "a day's quota is not"
+    assert not lr.is_busy(Exception(gone)), "'no longer available' is not 'unavailable'"
+    assert lr.reason(Exception(quota)) == "You exceeded your current quota, please check your plan and billing details. Please retry in 9h 3m 2s."
+    assert lr.reason(Exception(gone)) == "This model models/gemini-2.5-flash is no longer available to new users."
+    assert lr.reason(Exception(lr._PREFACE + ": This model is overloaded.")) == "This model is overloaded.", "plain text after the preface"
+    assert lr.reason(Exception("AI Task entity ai_task.x not found")) == "AI Task entity ai_task.x not found", "not Google's: as it is"
+    assert lr.reason(Exception("")) == "Exception"
+
+
 def test_a_full_label():
     got = lr.label_fields({"brand": "ESUN", "colour": "fire engine red", "hex": "#C8102E", "type": "pla+", "weight": 1000}, BRANDS, TYPES)
     assert got == {"brand": "eSun", "colour": "Fire engine red", "hex": "#c8102e", "type": "PLA+", "weight": 1000}

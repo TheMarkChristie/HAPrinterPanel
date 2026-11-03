@@ -30,7 +30,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import CONF_EVENTS, DEFAULT_EVENTS, DOMAIN, PANEL_ELEMENT, PANEL_FILE, PANEL_PATH, SIDEBAR_ICON, URL_BASE
 from .filament import RegisterError
-from .labelread import NO_AI, TIMEOUT_S, is_busy, read_label
+from .labelread import AI_BUSY, NO_AI, TIMEOUT_S, is_busy, read_label, reason
 from .linepause import STORE_VERSION
 from .link import PrinterLink
 from .pdf import register_pdf
@@ -309,9 +309,11 @@ async def ws_filament_read_label(hass: HomeAssistant, connection: websocket_api.
     except TimeoutError:
         connection.send_error(msg["id"], "failed", f"The AI did not answer within {TIMEOUT_S} s")
         return
-    except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page; a busy AI in plain words
-        connection.send_error(msg["id"], "failed",
-                              "The AI is busy (high demand): try again in a minute" if is_busy(err) else (str(err) or type(err).__name__))
+    except Exception as err:  # noqa: BLE001 - the AI's reason, whatever it is, goes back to the page in plain words
+        if is_busy(err):        # a code of its own, so the page says it in its own language
+            connection.send_error(msg["id"], AI_BUSY, "The AI is busy (high demand): try again in a minute")
+        else:
+            connection.send_error(msg["id"], "failed", reason(err))
         return
     finally:
         reading.discard(who)

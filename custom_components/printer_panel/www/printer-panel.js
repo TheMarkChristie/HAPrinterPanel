@@ -79,6 +79,7 @@
       fromPhoto: "From a photo of the label", reading: "Reading the label...", readDone: "Filled in from the photo: check it, then check it in.",
       readNothing: "Nothing could be read from the photo. Try closer, with the label flat and lit.",
       readFailed: (why) => `The photo could not be read: ${why}`, noAi: "Home Assistant has no AI task that can read photos. Add one (Google Generative AI, for example).",
+      aiBusy: "The AI is busy (high demand): try again in a minute.",
       slotOff: "Not known: the printer is off", notInCfs: "Not in the CFS",
       uses: "Colours in the print file", remaining: (p) => `${p} % left`,
       tune: "Speed and fans", speed: "Speed", slower: "Slower", faster: "Faster",
@@ -144,6 +145,7 @@
       fromPhoto: "Fra et bilde av etiketten", reading: "Leser etiketten...", readDone: "Fylt inn fra bildet: sjekk det, og sjekk den inn.",
       readNothing: "Ingenting kunne leses fra bildet. Prøv nærmere, med etiketten flat og godt lys.",
       readFailed: (why) => `Bildet kunne ikke leses: ${why}`, noAi: "Home Assistant har ingen AI-oppgave som kan lese bilder. Legg til en (for eksempel Google Generative AI).",
+      aiBusy: "AI-en er opptatt (stor pågang): prøv igjen om et minutt.",
       slotOff: "Ukjent: skriveren er av", notInCfs: "Ikke i CFS-en",
       uses: "Farger i utskriftsfilen", remaining: (p) => `${p} % igjen`,
       tune: "Fart og vifter", speed: "Fart", slower: "Saktere", faster: "Raskere",
@@ -1413,7 +1415,8 @@
         if (got.hex) { field("hex").value = got.hex; this._hexPicked = true; } else if (got.colour) { this._hexPicked = false; this._nameColour(); }
         this._say(dlg, Object.keys(got).length ? s.readDone : s.readNothing);
       } catch (err) {
-        this._say(dlg, err && err.code === "no_ai" ? s.noAi : s.readFailed((err && err.message) || String(err)));
+        this._say(dlg, err && err.code === "no_ai" ? s.noAi : err && err.code === "ai_busy" ? s.aiBusy
+          : s.readFailed((err && err.message) || String(err)));
       } finally {
         btn.removeAttribute("aria-disabled");
       }
